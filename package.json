@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-plugin-async-to-promises": "^1.0.5",
+    "web3-eth-contract": "^1.2.11"
+  },
+  "devDependencies": {}
+}

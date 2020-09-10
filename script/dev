@@ -1,0 +1,4 @@
+#!/bin/bash
+
+npx babel --plugins babel-plugin-async-to-promises src/index2.js --out-file src/index.js
+elm-app start

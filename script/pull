@@ -1,0 +1,12 @@
+#!/bin/bash
+
+mkdir -p public/networks
+
+cp -r ../rho-contracts/networks public
+
+jq '{
+		rho: .contracts["contracts/Rho.sol:Rho"].abi | fromjson,
+		rhoLens: .contracts["contracts/RhoLens.sol:RhoLensV1"].abi | fromjson,
+		erc20: .contracts["contracts/test/StandardToken.sol:ERC20"].abi | fromjson
+	}' \
+	../rho-contracts/.build/contracts.json > public/abis.json
