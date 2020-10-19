@@ -9,12 +9,17 @@
             "elm/browser": "1.0.2",
             "elm/core": "1.0.4",
             "elm/html": "1.0.0",
-            "elm/json": "1.1.2"
+            "elm/json": "1.1.2",
+            "elm/time": "1.0.0",
+            "prikhi/decimal": "2.0.0"
         },
         "indirect": {
-            "elm/time": "1.0.0",
+            "cmditch/elm-bigint": "1.0.1",
             "elm/url": "1.0.0",
-            "elm/virtual-dom": "1.0.2"
+            "elm/virtual-dom": "1.0.2",
+            "elm-community/list-extra": "8.2.4",
+            "elm-community/maybe-extra": "5.2.0",
+            "rtfeldman/elm-hex": "1.0.0"
         }
     },
     "test-dependencies": {

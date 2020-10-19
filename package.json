@@ -1,8 +1,22 @@
 {
+  "license": "ISC",
   "dependencies": {
-    "babel-cli": "^6.26.0",
-    "babel-plugin-async-to-promises": "^1.0.5",
-    "web3-eth-contract": "^1.2.11"
+    "bignumber.js": "^9.0.1",
+    "ethers": "^5.0.17",
+    "express": "^4.17.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "create-elm-app": "^5.9.0",
+    "@babel/core": "^7.10.0",
+    "@babel/preset-env": "^7.10.0"
+  },
+  "scripts": {
+    "deploy": "gcloud app deploy",
+    "build": "elm-app build",
+    "start": "node app.js",
+    "dev": "elm-app start"
+  },
+  "browserslist": [
+    "defaults"
+  ]
 }

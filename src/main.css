@@ -14,7 +14,6 @@ body {
   color: #213c1b;
   background-color: #edf1f7;
   margin: 0;
-
 }
 
 #container {
@@ -41,9 +40,34 @@ body {
   align-items: center;
 }
 
-#connectButton {
+
+#logo {
+  font-size: 2em;
+  grid-column: 1;
+}
+
+#title {
+  grid-column: 2;
+}
+
+#connectButton{
+  border: 1px;
   grid-column: 3;
+}
+
+
+.ctaButton {
+  /* remove default behavior */
+  appearance:none;
+  -webkit-appearance:none;
+
+  font-family:inherit;
   margin: 10px;
+  padding:10px;
+  border:none;
+  background-color:#d4accb;
+  color:#fff;
+  border-radius:5px;
 }
 
 #modal {
@@ -70,9 +94,7 @@ body {
   display: block;
   margin-top: 20px;
   margin-bottom: 20px;
-
   text-align: left;
-  /*border: 1px solid grey;*/
 }
 
 .text-button {
@@ -106,11 +128,6 @@ body {
 
 input{
   margin: 10px;
-  padding: 0px;
-  /*border:none;*/
-
-}
-
-#logo {
-  font-size: 2em;
+  padding: 10px;
+  border-radius:10px;
 }

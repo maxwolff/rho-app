@@ -1,0 +1,18 @@
+{
+  "main.css": "/static/css/main.3ea45230.chunk.css",
+  "main.js": "/static/js/main.35eb96fe.chunk.js",
+  "main.js.map": "/static/js/main.35eb96fe.chunk.js.map",
+  "runtime~main.js": "/static/js/runtime~main.1b922744.js",
+  "runtime~main.js.map": "/static/js/runtime~main.1b922744.js.map",
+  "vendors~main.js": "/static/js/vendors~main.7a7c2acb.chunk.js",
+  "vendors~main.js.map": "/static/js/vendors~main.7a7c2acb.chunk.js.map",
+  "./service-worker.js": "/./service-worker.js",
+  "abis.json": "/abis.json",
+  "favicon.ico": "/favicon.ico",
+  "index.html": "/index.html",
+  "logo.svg": "/logo.svg",
+  "manifest.json": "/manifest.json",
+  "networks/development.json": "/networks/development.json",
+  "networks/kovan.json": "/networks/kovan.json",
+  "precache-manifest.152f3834ebd32da8c6dbc4141ca35ce2.js": "/precache-manifest.152f3834ebd32da8c6dbc4141ca35ce2.js"
+}
