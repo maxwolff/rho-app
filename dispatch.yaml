@@ -1,0 +1,3 @@
+dispatch:
+  - url: "api.rho.finance/*"
+    service: rho-backend

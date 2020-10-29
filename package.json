@@ -1,20 +1,23 @@
 {
   "license": "ISC",
   "dependencies": {
-    "bignumber.js": "^9.0.1",
     "ethers": "^5.0.17",
     "express": "^4.17.1"
   },
   "devDependencies": {
-    "create-elm-app": "^5.9.0",
     "@babel/core": "^7.10.0",
-    "@babel/preset-env": "^7.10.0"
+    "@babel/preset-env": "^7.10.0",
+    "create-elm-app": "^5.9.0",
+    "node-sass-chokidar": "^1.5.0"
   },
   "scripts": {
-    "deploy": "gcloud app deploy",
-    "build": "elm-app build",
     "start": "node app.js",
-    "dev": "elm-app start"
+    "dev": "yarn watch-css & elm-app start",
+    "build-css": "node-sass-chokidar ./src -o ./build-css",
+    "watch-css": "yarn run build-css && node-sass-chokidar ./src -o ./build-css --watch",
+    "build": "yarn build-css && elm-app build",
+    "deploy": "yarn build && gcloud app deploy",
+    "push-dispatch": "gcloud app deploy dispatch.yaml"
   },
   "browserslist": [
     "defaults"

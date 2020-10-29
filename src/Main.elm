@@ -1,11 +1,69 @@
 port module Main exposing (..)
 
 import Browser
+import Browser.Navigation as Nav
 import Decimal exposing (Decimal)
-import Html exposing (Html, button, div, form, h1, h3, input, label, text)
-import Html.Attributes exposing (attribute, class, id, placeholder, type_, value)
+import Html exposing (Html, a, button, div, form, h1, h3, h4, input, label, li, option, select, text, ul)
+import Html.Attributes exposing (attribute, class, height, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Time
+import Url
+import Url.Parser
+
+
+type Page
+    = App
+    | History
+    | Landing
+
+
+defaultPage : Page
+defaultPage =
+    Landing
+
+
+routeParser : Url.Parser.Parser (Page -> a) a
+routeParser =
+    Url.Parser.oneOf
+        [ Url.Parser.map App (Url.Parser.s "app")
+        , Url.Parser.map History (Url.Parser.s "history")
+        ]
+
+
+getTitle : Page -> String
+getTitle page =
+    case page of
+        App ->
+            "Rho | App"
+
+        History ->
+            "Rho | History"
+
+        Landing ->
+            "Rho"
+
+
+getPage : Url.Url -> ( Page, Cmd msg, String )
+getPage location =
+    let
+        page =
+            Url.Parser.parse routeParser location |> Maybe.withDefault defaultPage
+
+        cmd =
+            case page of
+                History ->
+                    Cmd.batch [ isConnected (), swapHistory () ]
+
+                App ->
+                    Cmd.batch [ isConnected (), isApprovedCall (), cTokenBalance (), supplyBalance () ]
+
+                Landing ->
+                    Cmd.none
+
+        initTitle =
+            getTitle page
+    in
+    ( page, cmd, initTitle )
 
 
 
@@ -19,10 +77,18 @@ type Action
 
 
 type alias Model =
-    { underlying : String
-    , invalidNetworkBanner : Bool
-    , selectedAddr : String
-    , network : Maybe String
+    { -- page stuff
+      key : Nav.Key
+    , page : Page
+    , title : String
+    , underlying : String
+    , collateral : String
+    , duration : String
+
+    -- metamask
+    , connectionStatus : ConnectionStatus
+
+    -- modal state
     , actionSelected : Action
 
     --open modal form
@@ -31,36 +97,76 @@ type alias Model =
     , collateralDollars : Decimal
     , swapRate : Decimal
     , isPayingFixed : Bool
+    , supplyBalanceCToken : Decimal
+    , cTokenBalance : Decimal
 
     --supply modal form
     , supplyCTokenAmount : Decimal
     , supplyDollarAmount : Decimal
     , isApproved : Bool
+
+    -- history page
+    , historicalSwaps : List HistoricalSwap
     }
 
 
-type alias ConnectResponse =
-    { network : String, selectedAddr : String }
+type alias Web3Connection =
+    { selectedAddr : String
+    , network : String
+    }
 
 
-init : ( Model, Cmd Msg )
-init =
-    ( { underlying = "DAI"
-      , invalidNetworkBanner = False
-      , selectedAddr = ""
-      , network = Nothing
+type ConnectionStatus
+    = Connected Web3Connection
+    | NotConnected
+    | InvalidNetwork
+    | NoMetamask
+
+
+type alias Flags =
+    { underlying : String
+    , collateral : String
+    , duration : String
+    }
+
+
+init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        ( page, cmd, title ) =
+            getPage url
+    in
+    ( { key = key
+      , page = page
+      , title = title
+      , underlying = flags.underlying
+      , collateral = flags.collateral
+      , duration = flags.duration
+      , connectionStatus = NotConnected
       , actionSelected = Open
       , notionalAmount = Decimal.zero
       , collateralCTokens = Decimal.zero
       , collateralDollars = Decimal.zero
       , swapRate = Decimal.zero
       , isPayingFixed = True
+      , supplyBalanceCToken = Decimal.zero
+      , cTokenBalance = Decimal.zero
       , supplyCTokenAmount = Decimal.zero
       , supplyDollarAmount = Decimal.zero
-      , isApproved = True
+      , isApproved = False
+      , historicalSwaps = []
       }
-    , isApprovedCall ()
+    , cmd
     )
+
+
+type alias HistoricalSwap =
+    { initTimestamp : String
+    , notional : String
+    , rate : String
+    , userPayingFixed : Bool
+    , userPayout : Maybe String
+    }
 
 
 
@@ -68,6 +174,9 @@ init =
 
 
 port connect : () -> Cmd msg
+
+
+port isConnected : () -> Cmd msg
 
 
 port isApprovedCall : () -> Cmd msg
@@ -82,13 +191,22 @@ port supplyCTokensSend : String -> Cmd msg
 port supplyToCTokensCall : String -> Cmd msg
 
 
-port orderInfo : ( Bool, String ) -> Cmd msg
+port orderInfoCall : ( Bool, String ) -> Cmd msg
+
+
+port swapHistory : () -> Cmd msg
 
 
 port openSwapSend : ( Bool, String ) -> Cmd msg
 
 
-port connectReceiver : (ConnectResponse -> msg) -> Sub msg
+port supplyBalance : () -> Cmd msg
+
+
+port cTokenBalance : () -> Cmd msg
+
+
+port connectReceiver : (( String, String ) -> msg) -> Sub msg
 
 
 port enableReceiver : (Bool -> msg) -> Sub msg
@@ -100,18 +218,35 @@ port supplyToCTokensReceiver : (String -> msg) -> Sub msg
 port orderInfoReceiver : (( String, String, String ) -> msg) -> Sub msg
 
 
+port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
+
+
+port userBalancesReceiver : (( String, String ) -> msg) -> Sub msg
+
+
 
 -- SUBSCRIPTIONS
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
+subscriptions model =
+    let
+        tickCmd =
+            case ( model.page, model.isApproved ) of
+                ( App, False ) ->
+                    Time.every 1000 Tick
+
+                _ ->
+                    Sub.none
+    in
     Sub.batch
-        [ connectReceiver Connected
-        , enableReceiver Approve
+        [ connectReceiver HasConnected
+        , enableReceiver Approved
         , supplyToCTokensReceiver SupplyCTokens
         , orderInfoReceiver OrderInfo
-        , Time.every 5000 Tick
+        , swapHistoryReceiver SwapHistory
+        , userBalancesReceiver UserBalances
+        , tickCmd
         ]
 
 
@@ -122,17 +257,23 @@ subscriptions _ =
 type Msg
     = NoOp
     | SelectModal Action
-    | SelectPayingFixed Bool
     | NotionalAmountInput String
     | OrderInfo ( String, String, String )
-    | Approve Bool
+    | Approved Bool
     | ApproveCmd
-    | Connected ConnectResponse
+    | HasConnected ( String, String )
     | ConnectCmd
     | SupplyAmountInput String
     | SupplyCTokens String
     | SupplyTx
+    | OpenTx
     | Tick Time.Posix
+    | LinkClicked Browser.UrlRequest
+    | UrlChanged Url.Url
+    | TogglePayingFixed
+    | IsUserConnected Bool
+    | SwapHistory (List HistoricalSwap)
+    | UserBalances ( String, String )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -141,23 +282,37 @@ update msg model =
         ConnectCmd ->
             ( model, connect () )
 
-        Connected resp ->
-            ( { model | network = Just resp.network, selectedAddr = resp.selectedAddr }, Cmd.none )
+        HasConnected resp ->
+            case resp of
+                ( "invalid", "" ) ->
+                    ( { model | connectionStatus = InvalidNetwork }, Cmd.none )
+
+                ( "none", "" ) ->
+                    ( { model | connectionStatus = NoMetamask }, Cmd.none )
+
+                ( "unconnected", "" ) ->
+                    ( { model | connectionStatus = NotConnected }, Cmd.none )
+
+                ( network, addr ) ->
+                    ( { model | connectionStatus = Connected { network = network, selectedAddr = addr } }, Cmd.none )
 
         SelectModal action ->
             ( { model | actionSelected = action }, Cmd.none )
 
-        SelectPayingFixed pf ->
+        TogglePayingFixed ->
             let
                 notionalStr =
                     Decimal.toString model.notionalAmount
+
+                pf =
+                    not model.isPayingFixed
             in
-            ( { model | isPayingFixed = pf }, orderInfo ( pf, notionalStr ) )
+            ( { model | isPayingFixed = pf }, orderInfoCall ( pf, notionalStr ) )
 
         ApproveCmd ->
             ( model, approveSend () )
 
-        Approve isApproved ->
+        Approved isApproved ->
             ( { model | isApproved = isApproved }, Cmd.none )
 
         SupplyAmountInput amt ->
@@ -178,12 +333,12 @@ update msg model =
                 ( decAmt, strAmt ) =
                     formatInput notional
             in
-            ( { model | notionalAmount = decAmt }, orderInfo ( model.isPayingFixed, strAmt ) )
+            ( { model | notionalAmount = decAmt }, orderInfoCall ( model.isPayingFixed, strAmt ) )
 
         OrderInfo ( swapRate, collatCToken, collatDollars ) ->
             let
-                percRate =
-                    100 |> Decimal.fromInt |> Decimal.mul (toDec swapRate model.swapRate)
+                rate =
+                    toDec swapRate model.swapRate
 
                 collatCTokenDec =
                     toDec collatCToken model.collateralCTokens
@@ -191,13 +346,35 @@ update msg model =
                 collatDollarDec =
                     toDec collatDollars model.collateralDollars
             in
-            ( { model | collateralCTokens = collatCTokenDec, swapRate = percRate, collateralDollars = collatDollarDec }, Cmd.none )
+            ( { model | collateralCTokens = collatCTokenDec, swapRate = rate, collateralDollars = collatDollarDec }, Cmd.none )
 
         OpenTx ->
-            ( model, openSwapSend ( model.isPayingFixed, model.notionalAmount ) )
+            ( model, openSwapSend ( model.isPayingFixed, Decimal.toString model.notionalAmount ) )
+
+        SwapHistory resp ->
+            -- todo: put into decs
+            ( { model | historicalSwaps = resp }, Cmd.none )
+
+        UserBalances ( supplyBal, cTokenBal ) ->
+            ( { model | supplyBalanceCToken = toDec supplyBal model.supplyBalanceCToken, cTokenBalance = toDec cTokenBal model.cTokenBalance }, Cmd.none )
 
         Tick _ ->
-            ( model, isApprovedCall () )
+            ( model, Cmd.batch [ isApprovedCall () ] )
+
+        LinkClicked urlRequest ->
+            case urlRequest of
+                Browser.Internal url ->
+                    ( model, Nav.pushUrl model.key (Url.toString url) )
+
+                Browser.External href ->
+                    ( model, Nav.load href )
+
+        UrlChanged url ->
+            let
+                ( page, cmd, title ) =
+                    getPage url
+            in
+            ( { model | page = page, title = title }, cmd )
 
         _ ->
             ( model, Cmd.none )
@@ -207,29 +384,107 @@ update msg model =
 ---- VIEW ----
 
 
-view : Model -> Html Msg
+view : Model -> Browser.Document Msg
 view model =
-    div [ id "container" ]
-        [ header model.network model.selectedAddr
-        , modal model
+    let
+        body =
+            case model.page of
+                App ->
+                    [ header model.connectionStatus True
+                    , modal model
+                    ]
+
+                History ->
+                    [ header model.connectionStatus True
+                    , historyPage model.historicalSwaps model.collateral
+                    ]
+
+                Landing ->
+                    [ header model.connectionStatus False
+                    , landing (LandingStats True)
+                    ]
+    in
+    { title = model.title
+    , body = [ div [ id "container" ] body ]
+    }
+
+
+header : ConnectionStatus -> Bool -> Html Msg
+header connectionStatus showMetamask =
+    let
+        metamaskBtn =
+            case showMetamask of
+                True ->
+                    case connectionStatus of
+                        Connected connection ->
+                            div [ id "connected" ] [ text (connection.network ++ " " ++ String.slice 0 4 connection.selectedAddr ++ ".." ++ String.slice -4 -1 connection.selectedAddr) ]
+
+                        NotConnected ->
+                            button [ onClick ConnectCmd, class "ctaButton", id "connectButton" ] [ text "Connect Metamask" ]
+
+                        InvalidNetwork ->
+                            div [ id "connected" ] [ text "Invalid network" ]
+
+                        NoMetamask ->
+                            div [ id "connected" ] [ text "Need Metamask" ]
+
+                False ->
+                    div [] []
+    in
+    div [ id "header" ]
+        [ a [ href "/" ]
+            [ h1 [ id "logo" ] [ text "Rho%" ]
+            ]
+        , a [ href "/app", id "appNavButton" ] [ text "App" ]
+        , a [ href "/history", id "historyNavButton" ] [ text "Swap History" ]
+        , metamaskBtn
         ]
 
 
-header : Maybe String -> String -> Html Msg
-header network selectedAddr =
+type alias LandingStats =
+    { placeHolder : Bool }
+
+
+landing : LandingStats -> Html Msg
+landing stats =
+    div [ id "modal" ]
+        [ div
+            [ class "landing-title" ]
+            [ h3 [] [ text "Rho is a protocol for interest rate swaps" ] ]
+        , ul [ class "landing-list" ] [ li [] [ text "You can use it for things" ] ]
+        , button [ class "ctaButton", id "connectButton" ] [ a [ href "/app" ] [ text "App" ] ]
+        ]
+
+
+historyPage : List HistoricalSwap -> String -> Html Msg
+historyPage swaps collatName =
     let
-        ctaButton =
-            case network of
-                Just name ->
-                    div [ id "connectButton" ] [ text ("🔗: " ++ name ++ " " ++ String.slice 0 7 selectedAddr ++ "...") ]
+        title =
+            [ h3 [ id "title" ] [ text "Swap History" ] ]
+
+        elems =
+            List.map (historyElem collatName) swaps
+
+        body =
+            List.append title elems
+    in
+    div [ id "modal" ] body
+
+
+historyElem : String -> HistoricalSwap -> Html Msg
+historyElem collatName swap =
+    let
+        ( swapStatus, sinceOrPayout, titleClass ) =
+            case swap.userPayout of
+                Just p ->
+                    ( "Closed", "earned " ++ p ++ " " ++ collatName, "swapTitleClosed" )
 
                 Nothing ->
-                    button [ onClick ConnectCmd, class "ctaButton", id "connectButton" ] [ text "Connect Metamask" ]
+                    ( "Open", "since block: " ++ swap.initTimestamp, "swapTitleOpen" )
     in
-    div [ id "header" ]
-        [ h1 [ id "logo" ] [ text "Rho" ]
-        , h3 [ id "title" ] [ text "cDAI Interest Rate Swaps" ]
-        , ctaButton
+    div [ class "swapBox", class "modal-field" ]
+        [ label [ class titleClass ] [ text swapStatus ]
+        , label [] [ text (rateVerb swap.userPayingFixed True ++ " " ++ swap.rate ++ "% on " ++ swap.notional ++ " notional, " ++ sinceOrPayout) ]
         ]
 
 
@@ -239,32 +494,40 @@ modal model =
         action =
             model.actionSelected
 
+        ctaButton =
+            case model.isApproved of
+                True ->
+                    case action of
+                        Open ->
+                            button [ onClick OpenTx, class "ctaButton" ] [ text "Open Swap" ]
+
+                        Supply ->
+                            button [ onClick SupplyTx, class "ctaButton" ] [ text "Supply Liquidity" ]
+
+                        _ ->
+                            div [] []
+
+                False ->
+                    button [ onClick ApproveCmd, class "ctaButton" ] [ text ("Enable " ++ model.collateral) ]
+
         selectedModal =
             case action of
                 Open ->
-                    openModal model
+                    div [] [ openModal model, ctaButton ]
 
                 Supply ->
-                    supplyModal model
+                    div [] [ supplyModal model, ctaButton ]
 
                 _ ->
                     div [] []
-
-        maybeEnableButton =
-            case model.isApproved of
-                True ->
-                    div [] []
-
-                False ->
-                    button [ onClick ApproveCmd ] [ text ("Enable c" ++ model.underlying) ]
     in
     div [ id "modal" ]
-        [ div [ id "buttonRow" ]
+        [ h3 [ id "title" ] [ text (model.duration ++ " day " ++ model.collateral ++ " Interest Rate Swaps") ]
+        , div [ id "buttonRow" ]
             [ selectorButton (action == Open) (SelectModal Open) "Open"
             , selectorButton (action == Supply) (SelectModal Supply) "Supply"
             , selectorButton (action == Remove) (SelectModal Remove) "Remove"
             ]
-        , maybeEnableButton
         , selectedModal
         ]
 
@@ -272,21 +535,31 @@ modal model =
 supplyModal : Model -> Html Msg
 supplyModal model =
     div [ class "form-elem" ]
-        [ inputForm "$ of cDAI to supply: " "0" (Decimal.toString model.supplyDollarAmount) SupplyAmountInput
-        , textArea ("cTokens: " ++ Decimal.toString model.supplyCTokenAmount)
-        , button [ onClick SupplyTx, class "ctaButton" ] [ text "Supply Liquidity" ]
+        [ div [ class "modal-field" ] [ text ("Current Wallet Balance: " ++ Decimal.toString model.cTokenBalance ++ " cTokens") ]
+        , div [ class "modal-field" ] [ text ("Current Supply Balance: " ++ (Decimal.toString model.supplyBalanceCToken ++ " cTokens")) ]
+        , inputForm "Supply Amount : $" "0" (Decimal.toString model.supplyDollarAmount) SupplyAmountInput
+        , div [ class "modal-field" ] [ text (Decimal.toString model.supplyCTokenAmount ++ " cTokens") ]
         ]
+
+
+rateVerb : Bool -> Bool -> String
+rateVerb userPayingFixed isVerbForFixed =
+    case userPayingFixed == isVerbForFixed of
+        True ->
+            "Pay"
+
+        False ->
+            "Receive"
 
 
 openModal : Model -> Html Msg
 openModal model =
     let
-        cTokenText =
-            if model.isPayingFixed then
-                "Receive"
+        fixedRateVerb =
+            rateVerb model.isPayingFixed True
 
-            else
-                "Pay"
+        floatRateVerb =
+            rateVerb model.isPayingFixed False
 
         swapRateText =
             case Decimal.toString model.swapRate of
@@ -295,29 +568,22 @@ openModal model =
 
                 a ->
                     a ++ "%"
+
+        collatText =
+            "Collateral Required: $" ++ Decimal.toString model.collateralDollars ++ ", " ++ Decimal.toString model.collateralCTokens ++ " c" ++ model.underlying
     in
-    div [ class "form-elem" ]
-        [ inputForm "Notional Amount (# DAI)         " "0" (Decimal.toString model.notionalAmount) NotionalAmountInput
-        , textArea ("Collateral Required ($)       : " ++ Decimal.toString model.collateralDollars)
-        , textArea ("Collateral Required (CTokens) : " ++ Decimal.toString model.collateralCTokens)
+    div []
+        [ div [ class "modal-field" ] [ text ("Current Wallet Balance: " ++ Decimal.toString model.cTokenBalance ++ " cTokens") ]
+        , inputForm ("Notional Amount in " ++ model.underlying) "0" (Decimal.toString model.notionalAmount) NotionalAmountInput
         , div [ class "modal-field" ]
-            [ selectorButton model.isPayingFixed
-                (SelectPayingFixed True)
-                "Pay"
-            , selectorButton
-                (not model.isPayingFixed)
-                (SelectPayingFixed False)
-                "Receive"
-            , text swapRateText
+            [ button [ id "toggle-swap-type", onClick TogglePayingFixed ]
+                [ label [] [ text fixedRateVerb ]
+                , div [ class "gg-chevron-down" ] []
+                ]
+            , text ("  " ++ swapRateText ++ ", " ++ floatRateVerb ++ " cDAI borrow rate")
             ]
-        , div [ class "modal-field" ] [ text (cTokenText ++ " the cDAI borrow rate") ]
-        , button [ onClick OpenTx, class "ctaButton" ] [ text "Open Swap" ]
+        , div [ class "modal-field" ] [ text collatText ]
         ]
-
-
-textArea : String -> Html msg
-textArea str =
-    div [ class "modal-field" ] [ text str ]
 
 
 inputForm : String -> String -> String -> (String -> msg) -> Html msg
@@ -370,11 +636,13 @@ formatInput str =
 ---- PROGRAM ----
 
 
-main : Program () Model Msg
+main : Program Flags Model Msg
 main =
-    Browser.element
+    Browser.application
         { view = view
-        , init = \_ -> init
+        , init = init
         , update = update
         , subscriptions = subscriptions
+        , onUrlChange = UrlChanged
+        , onUrlRequest = LinkClicked
         }
