@@ -1,9 +1,11 @@
 # Rho App
 
+https://rho-proj.uc.r.appspot.com
 
-yarn start
 
-
+* `yarn start`: serve
+* `yarn deploy`: deploy to Google App Engine
+* `yarn dev`: start dev server
 
 
 
