@@ -72,6 +72,7 @@ getPage location =
 
 type Action
     = Open
+    | Close
     | Supply
     | Remove
 
@@ -161,11 +162,20 @@ init flags url key =
 
 
 type alias HistoricalSwap =
-    { initTimestamp : String
+    { timeAgo : String
     , notional : String
     , rate : String
     , userPayingFixed : Bool
     , userPayout : Maybe String
+    , swapHash : String
+    }
+
+
+type alias OrderInfoResponse =
+    { swapRate : String
+    , collatCToken : String
+    , collatDollars : String
+    , protocolIsCollateralized : Bool
     }
 
 
@@ -206,6 +216,9 @@ port supplyBalance : () -> Cmd msg
 port cTokenBalance : () -> Cmd msg
 
 
+port closeSwapSend : String -> Cmd msg
+
+
 port connectReceiver : (( String, String ) -> msg) -> Sub msg
 
 
@@ -215,7 +228,7 @@ port enableReceiver : (Bool -> msg) -> Sub msg
 port supplyToCTokensReceiver : (String -> msg) -> Sub msg
 
 
-port orderInfoReceiver : (( String, String, String ) -> msg) -> Sub msg
+port orderInfoReceiver : (OrderInfoResponse -> msg) -> Sub msg
 
 
 port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
@@ -258,7 +271,7 @@ type Msg
     = NoOp
     | SelectModal Action
     | NotionalAmountInput String
-    | OrderInfo ( String, String, String )
+    | OrderInfo OrderInfoResponse
     | Approved Bool
     | ApproveCmd
     | HasConnected ( String, String )
@@ -267,6 +280,7 @@ type Msg
     | SupplyCTokens String
     | SupplyTx
     | OpenTx
+    | CloseTx String
     | Tick Time.Posix
     | LinkClicked Browser.UrlRequest
     | UrlChanged Url.Url
@@ -297,7 +311,12 @@ update msg model =
                     ( { model | connectionStatus = Connected { network = network, selectedAddr = addr } }, Cmd.none )
 
         SelectModal action ->
-            ( { model | actionSelected = action }, Cmd.none )
+            case action of
+                Close ->
+                    ( { model | actionSelected = action }, swapHistory () )
+
+                _ ->
+                    ( { model | actionSelected = action }, Cmd.none )
 
         TogglePayingFixed ->
             let
@@ -335,21 +354,25 @@ update msg model =
             in
             ( { model | notionalAmount = decAmt }, orderInfoCall ( model.isPayingFixed, strAmt ) )
 
-        OrderInfo ( swapRate, collatCToken, collatDollars ) ->
+        OrderInfo resp ->
+            --( swapRate, collatCToken, collatDollars, isProtocolCollateralized ) ->
             let
                 rate =
-                    toDec swapRate model.swapRate
+                    toDec resp.swapRate model.swapRate
 
                 collatCTokenDec =
-                    toDec collatCToken model.collateralCTokens
+                    toDec resp.collatCToken model.collateralCTokens
 
                 collatDollarDec =
-                    toDec collatDollars model.collateralDollars
+                    toDec resp.collatDollars model.collateralDollars
             in
             ( { model | collateralCTokens = collatCTokenDec, swapRate = rate, collateralDollars = collatDollarDec }, Cmd.none )
 
         OpenTx ->
             ( model, openSwapSend ( model.isPayingFixed, Decimal.toString model.notionalAmount ) )
+
+        CloseTx swapHash ->
+            ( model, closeSwapSend swapHash )
 
         SwapHistory resp ->
             -- todo: put into decs
@@ -463,7 +486,12 @@ historyPage swaps collatName =
             [ h3 [ id "title" ] [ text "Swap History" ] ]
 
         elems =
-            List.map (historyElem collatName) swaps
+            case swaps of
+                [] ->
+                    [ div [ class "modal-field" ] [ text "No account swap history" ] ]
+
+                _ ->
+                    List.map (historyElem collatName) swaps
 
         body =
             List.append title elems
@@ -480,7 +508,7 @@ historyElem collatName swap =
                     ( "Closed", "earned " ++ p ++ " " ++ collatName, "swapTitleClosed" )
 
                 Nothing ->
-                    ( "Open", "since block: " ++ swap.initTimestamp, "swapTitleOpen" )
+                    ( "Open", swap.timeAgo ++ " ago", "swapTitleOpen" )
     in
     div [ class "swapBox", class "modal-field" ]
         [ label [ class titleClass ] [ text swapStatus ]
@@ -518,6 +546,9 @@ modal model =
                 Supply ->
                     div [] [ supplyModal model, ctaButton ]
 
+                Close ->
+                    div [] [ closeModal model ]
+
                 _ ->
                     div [] []
     in
@@ -525,6 +556,7 @@ modal model =
         [ h3 [ id "title" ] [ text (model.duration ++ " day " ++ model.collateral ++ " Interest Rate Swaps") ]
         , div [ id "buttonRow" ]
             [ selectorButton (action == Open) (SelectModal Open) "Open"
+            , selectorButton (action == Close) (SelectModal Close) "Close"
             , selectorButton (action == Supply) (SelectModal Supply) "Supply"
             , selectorButton (action == Remove) (SelectModal Remove) "Remove"
             ]
@@ -540,6 +572,25 @@ supplyModal model =
         , inputForm "Supply Amount : $" "0" (Decimal.toString model.supplyDollarAmount) SupplyAmountInput
         , div [ class "modal-field" ] [ text (Decimal.toString model.supplyCTokenAmount ++ " cTokens") ]
         ]
+
+
+closeModal : Model -> Html Msg
+closeModal model =
+    let
+        elems =
+            case model.historicalSwaps of
+                [] ->
+                    [ div [ class "modal-field" ] [ text "No closeable swaps" ] ]
+
+                swaps ->
+                    List.map closeElem (List.filter (\swap -> swap.userPayout == Nothing) swaps)
+    in
+    div [] elems
+
+
+closeElem : HistoricalSwap -> Html Msg
+closeElem swap =
+    button [ class "ctaButton", onClick (CloseTx swap.swapHash) ] [ text ("Close " ++ rateVerb swap.userPayingFixed True ++ " " ++ swap.rate ++ " on " ++ swap.notional ++ " notional") ]
 
 
 rateVerb : Bool -> Bool -> String
