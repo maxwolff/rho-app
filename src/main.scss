@@ -11,6 +11,7 @@
 $light-blue: #edf1f7;
 $dark-blue: #0000CC;
 $dark-grey: solid grey;
+$warn-red: red;
 $grey: #D3D3D3;
 $med-size: 1.3em;
 $purple: #d4accb;
@@ -75,8 +76,9 @@ input {
   grid-column: left / right;
   grid-row: top / top-content;
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 5fr 1fr 1fr 1fr 2fr;
   align-items: center; 
+  justify-content: center;
 }
 
 #modal {
@@ -101,23 +103,27 @@ input {
 #title {
   grid-column: 2; }
 
-#appNavButton {
-  grid-column: 3; }
-
-
-#historyNavButton {
-  grid-column: 4; }
-
 #connectButton {
   margin: 0.1em;
-  grid-column: 5;
+  grid-column: 6;
   margin: 1em; }
 
 #connected {
   @include rounded-border;
-  grid-column: 5;
+  grid-column: 6;
   background-color: white;
-  margin: 0.1em; }
+  margin: .8em;
+  display: flex;
+  flex-direction: column;
+  padding: .1em;
+}
+
+#connectElem {
+  text-align: left;
+  margin-left: .3em;
+  margin-right: .3em;
+  width: fit-content;
+}
 
 
 // Modal
@@ -127,6 +133,10 @@ input {
   text-align: left;
   margin-top: 1.5em;
    }
+
+.warning {
+  color: $warn-red;
+}
 
 #toggle-swap-type {
   border: none;

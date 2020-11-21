@@ -15,6 +15,7 @@ type Page
     = App
     | History
     | Landing
+    | Markets
 
 
 defaultPage : Page
@@ -27,6 +28,7 @@ routeParser =
     Url.Parser.oneOf
         [ Url.Parser.map App (Url.Parser.s "app")
         , Url.Parser.map History (Url.Parser.s "history")
+        , Url.Parser.map Markets (Url.Parser.s "markets")
         ]
 
 
@@ -38,6 +40,9 @@ getTitle page =
 
         History ->
             "Rho | History"
+
+        Markets ->
+            "Rho | Markets"
 
         Landing ->
             "Rho"
@@ -57,6 +62,9 @@ getPage location =
                 App ->
                     Cmd.batch [ isConnected (), isApprovedCall (), cTokenBalance (), supplyBalance () ]
 
+                Markets ->
+                    getMarkets ()
+
                 Landing ->
                     Cmd.none
 
@@ -66,55 +74,11 @@ getPage location =
     ( page, cmd, initTitle )
 
 
-
----- MODEL ----
-
-
 type Action
     = Open
     | Close
     | Supply
     | Remove
-
-
-type alias Model =
-    { -- page stuff
-      key : Nav.Key
-    , page : Page
-    , title : String
-    , underlying : String
-    , collateral : String
-    , duration : String
-
-    -- metamask
-    , connectionStatus : ConnectionStatus
-
-    -- modal state
-    , actionSelected : Action
-
-    --open modal form
-    , notionalAmount : Decimal
-    , collateralCTokens : Decimal
-    , collateralDollars : Decimal
-    , swapRate : Decimal
-    , isPayingFixed : Bool
-    , supplyBalanceCToken : Decimal
-    , cTokenBalance : Decimal
-
-    --supply modal form
-    , supplyCTokenAmount : Decimal
-    , supplyDollarAmount : Decimal
-    , isApproved : Bool
-
-    -- history page
-    , historicalSwaps : List HistoricalSwap
-    }
-
-
-type alias Web3Connection =
-    { selectedAddr : String
-    , network : String
-    }
 
 
 type ConnectionStatus
@@ -128,37 +92,14 @@ type alias Flags =
     { underlying : String
     , collateral : String
     , duration : String
+    , defaultNetwork : String
     }
 
 
-init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
-init flags url key =
-    let
-        ( page, cmd, title ) =
-            getPage url
-    in
-    ( { key = key
-      , page = page
-      , title = title
-      , underlying = flags.underlying
-      , collateral = flags.collateral
-      , duration = flags.duration
-      , connectionStatus = NotConnected
-      , actionSelected = Open
-      , notionalAmount = Decimal.zero
-      , collateralCTokens = Decimal.zero
-      , collateralDollars = Decimal.zero
-      , swapRate = Decimal.zero
-      , isPayingFixed = True
-      , supplyBalanceCToken = Decimal.zero
-      , cTokenBalance = Decimal.zero
-      , supplyCTokenAmount = Decimal.zero
-      , supplyDollarAmount = Decimal.zero
-      , isApproved = False
-      , historicalSwaps = []
-      }
-    , cmd
-    )
+type alias Web3Connection =
+    { selectedAddr : String
+    , network : String
+    }
 
 
 type alias HistoricalSwap =
@@ -177,6 +118,93 @@ type alias OrderInfoResponse =
     , collatDollars : String
     , protocolIsCollateralized : Bool
     }
+
+
+type alias GetMarketsResponse =
+    { notionalReceivingFixed : String
+    , notionalPayingFixed : String
+    , supplierLiquidity : String
+    }
+
+
+
+---- MODEL ----
+
+
+type alias Model =
+    { -- page stuff
+      key : Nav.Key
+    , page : Page
+    , title : String
+    , underlying : String
+    , collateral : String
+    , duration : String
+    , defaultNetwork : String
+
+    -- metamask
+    , connectionStatus : ConnectionStatus
+
+    -- modal state
+    , actionSelected : Action
+
+    --open modal form
+    , notionalAmount : Decimal
+    , collateralCTokens : Decimal
+    , collateralDollars : Decimal
+    , swapRate : Decimal
+    , isPayingFixed : Bool
+    , supplyBalanceCToken : Decimal
+    , cTokenBalance : Decimal
+    , protocolCollateralized : Bool
+
+    --supply modal form
+    , supplyCTokenAmount : Decimal
+    , supplyDollarAmount : Decimal
+    , isApproved : Bool
+
+    -- history page
+    , historicalSwaps : List HistoricalSwap
+
+    -- markets
+    , notionalReceivingFixed : Decimal
+    , notionalPayingFixed : Decimal
+    , supplierLiquidity : Decimal
+    }
+
+
+init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
+init flags url key =
+    let
+        ( page, cmd, title ) =
+            getPage url
+    in
+    ( { key = key
+      , page = page
+      , title = title
+      , underlying = flags.underlying
+      , collateral = flags.collateral
+      , duration = flags.duration
+      , defaultNetwork = flags.defaultNetwork
+      , protocolCollateralized = True
+      , connectionStatus = NotConnected
+      , actionSelected = Open
+      , notionalAmount = Decimal.zero
+      , collateralCTokens = Decimal.zero
+      , collateralDollars = Decimal.zero
+      , swapRate = Decimal.zero
+      , isPayingFixed = True
+      , supplyBalanceCToken = Decimal.zero
+      , cTokenBalance = Decimal.zero
+      , supplyCTokenAmount = Decimal.zero
+      , supplyDollarAmount = Decimal.zero
+      , isApproved = False
+      , historicalSwaps = []
+      , notionalReceivingFixed = Decimal.zero
+      , notionalPayingFixed = Decimal.zero
+      , supplierLiquidity = Decimal.zero
+      }
+    , cmd
+    )
 
 
 
@@ -219,6 +247,9 @@ port cTokenBalance : () -> Cmd msg
 port closeSwapSend : String -> Cmd msg
 
 
+port getMarkets : () -> Cmd msg
+
+
 port connectReceiver : (( String, String ) -> msg) -> Sub msg
 
 
@@ -235,6 +266,9 @@ port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
 
 
 port userBalancesReceiver : (( String, String ) -> msg) -> Sub msg
+
+
+port getMarketsReceiver : (GetMarketsResponse -> msg) -> Sub msg
 
 
 
@@ -259,6 +293,7 @@ subscriptions model =
         , orderInfoReceiver OrderInfo
         , swapHistoryReceiver SwapHistory
         , userBalancesReceiver UserBalances
+        , getMarketsReceiver MarketsInfo
         , tickCmd
         ]
 
@@ -288,6 +323,7 @@ type Msg
     | IsUserConnected Bool
     | SwapHistory (List HistoricalSwap)
     | UserBalances ( String, String )
+    | MarketsInfo GetMarketsResponse
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -355,7 +391,6 @@ update msg model =
             ( { model | notionalAmount = decAmt }, orderInfoCall ( model.isPayingFixed, strAmt ) )
 
         OrderInfo resp ->
-            --( swapRate, collatCToken, collatDollars, isProtocolCollateralized ) ->
             let
                 rate =
                     toDec resp.swapRate model.swapRate
@@ -366,7 +401,7 @@ update msg model =
                 collatDollarDec =
                     toDec resp.collatDollars model.collateralDollars
             in
-            ( { model | collateralCTokens = collatCTokenDec, swapRate = rate, collateralDollars = collatDollarDec }, Cmd.none )
+            ( { model | collateralCTokens = collatCTokenDec, swapRate = rate, collateralDollars = collatDollarDec, protocolCollateralized = resp.protocolIsCollateralized }, Cmd.none )
 
         OpenTx ->
             ( model, openSwapSend ( model.isPayingFixed, Decimal.toString model.notionalAmount ) )
@@ -380,6 +415,19 @@ update msg model =
 
         UserBalances ( supplyBal, cTokenBal ) ->
             ( { model | supplyBalanceCToken = toDec supplyBal model.supplyBalanceCToken, cTokenBalance = toDec cTokenBal model.cTokenBalance }, Cmd.none )
+
+        MarketsInfo resp ->
+            let
+                nrfDec =
+                    toDec resp.notionalReceivingFixed model.notionalReceivingFixed
+
+                npfDec =
+                    toDec resp.notionalPayingFixed model.notionalPayingFixed
+
+                slDec =
+                    toDec resp.supplierLiquidity model.supplierLiquidity
+            in
+            ( { model | notionalReceivingFixed = nrfDec, notionalPayingFixed = npfDec, supplierLiquidity = slDec }, Cmd.none )
 
         Tick _ ->
             ( model, Cmd.batch [ isApprovedCall () ] )
@@ -413,17 +461,22 @@ view model =
         body =
             case model.page of
                 App ->
-                    [ header model.connectionStatus True
+                    [ header model True
                     , modal model
                     ]
 
                 History ->
-                    [ header model.connectionStatus True
+                    [ header model True
                     , historyPage model.historicalSwaps model.collateral
                     ]
 
+                Markets ->
+                    [ header model True
+                    , marketsPage model
+                    ]
+
                 Landing ->
-                    [ header model.connectionStatus False
+                    [ header model False
                     , landing (LandingStats True)
                     ]
     in
@@ -432,15 +485,22 @@ view model =
     }
 
 
-header : ConnectionStatus -> Bool -> Html Msg
-header connectionStatus showMetamask =
+header : Model -> Bool -> Html Msg
+header model showMetamask =
     let
         metamaskBtn =
             case showMetamask of
                 True ->
-                    case connectionStatus of
+                    case model.connectionStatus of
                         Connected connection ->
-                            div [ id "connected" ] [ text (connection.network ++ " " ++ String.slice 0 4 connection.selectedAddr ++ ".." ++ String.slice -4 -1 connection.selectedAddr) ]
+                            let
+                                netText =
+                                    connection.network ++ " " ++ String.slice 0 4 connection.selectedAddr ++ ".." ++ String.slice -4 -1 connection.selectedAddr
+
+                                collatText =
+                                    Decimal.toString model.cTokenBalance ++ " " ++ model.collateral
+                            in
+                            div [ id "connected" ] [ div [ id "connectElem" ] [ text netText ], div [ id "connectElem" ] [ text collatText ] ]
 
                         NotConnected ->
                             button [ onClick ConnectCmd, class "ctaButton", id "connectButton" ] [ text "Connect Metamask" ]
@@ -458,8 +518,10 @@ header connectionStatus showMetamask =
         [ a [ href "/" ]
             [ h1 [ id "logo" ] [ text "Rho%" ]
             ]
-        , a [ href "/app", id "appNavButton" ] [ text "App" ]
-        , a [ href "/history", id "historyNavButton" ] [ text "Swap History" ]
+        , div [] []
+        , a [ href "/app" ] [ text "App" ]
+        , a [ href "/history" ] [ text "History" ]
+        , a [ href "/markets" ] [ text "Markets" ]
         , metamaskBtn
         ]
 
@@ -476,6 +538,16 @@ landing stats =
             [ h3 [] [ text "Rho is a protocol for interest rate swaps" ] ]
         , ul [ class "landing-list" ] [ li [] [ text "You can use it for things" ] ]
         , button [ class "ctaButton", id "connectButton" ] [ a [ href "/app" ] [ text "App" ] ]
+        ]
+
+
+marketsPage : Model -> Html Msg
+marketsPage model =
+    div [ id "modal" ]
+        [ h3 [ id "title" ] [ text "Market Overview" ]
+        , div [ class "modal-field" ] [ text ("Swaps Receiving Fixed: " ++ Decimal.toString model.notionalReceivingFixed) ]
+        , div [ class "modal-field" ] [ text ("Swaps Paying Fixed: " ++ Decimal.toString model.notionalPayingFixed) ]
+        , div [ class "modal-field" ] [ text ("Total Liquidity: " ++ Decimal.toString model.supplierLiquidity) ]
         ]
 
 
@@ -567,10 +639,9 @@ modal model =
 supplyModal : Model -> Html Msg
 supplyModal model =
     div [ class "form-elem" ]
-        [ div [ class "modal-field" ] [ text ("Current Wallet Balance: " ++ Decimal.toString model.cTokenBalance ++ " cTokens") ]
-        , div [ class "modal-field" ] [ text ("Current Supply Balance: " ++ (Decimal.toString model.supplyBalanceCToken ++ " cTokens")) ]
+        [ div [ class "modal-field" ] [ text ("Current Supply Balance: " ++ (Decimal.toString model.supplyBalanceCToken ++ " " ++ model.collateral)) ]
         , inputForm "Supply Amount : $" "0" (Decimal.toString model.supplyDollarAmount) SupplyAmountInput
-        , div [ class "modal-field" ] [ text (Decimal.toString model.supplyCTokenAmount ++ " cTokens") ]
+        , div [ class "modal-field" ] [ text (Decimal.toString model.supplyCTokenAmount ++ " " ++ model.collateral) ]
         ]
 
 
@@ -620,20 +691,35 @@ openModal model =
                 a ->
                     a ++ "%"
 
-        collatText =
-            "Collateral Required: $" ++ Decimal.toString model.collateralDollars ++ ", " ++ Decimal.toString model.collateralCTokens ++ " c" ++ model.underlying
+        collatField =
+            case model.protocolCollateralized of
+                False ->
+                    div [ class "modal-field", class "warning" ] [ text "Insufficient protocol collateral" ]
+
+                True ->
+                    let
+                        str =
+                            String.concat
+                                [ "Collateral Required: $"
+                                , Decimal.toString model.collateralDollars
+                                , ", "
+                                , Decimal.toString model.collateralCTokens
+                                , " "
+                                , model.collateral
+                                ]
+                    in
+                    div [ class "modal-field" ] [ text str ]
     in
     div []
-        [ div [ class "modal-field" ] [ text ("Current Wallet Balance: " ++ Decimal.toString model.cTokenBalance ++ " cTokens") ]
-        , inputForm ("Notional Amount in " ++ model.underlying) "0" (Decimal.toString model.notionalAmount) NotionalAmountInput
+        [ inputForm ("Notional Amount in " ++ model.underlying) "0" (Decimal.toString model.notionalAmount) NotionalAmountInput
         , div [ class "modal-field" ]
             [ button [ id "toggle-swap-type", onClick TogglePayingFixed ]
                 [ label [] [ text fixedRateVerb ]
                 , div [ class "gg-chevron-down" ] []
                 ]
-            , text ("  " ++ swapRateText ++ ", " ++ floatRateVerb ++ " cDAI borrow rate")
+            , text ("  " ++ swapRateText ++ ", " ++ floatRateVerb ++ " " ++ model.collateral ++ " borrow rate")
             ]
-        , div [ class "modal-field" ] [ text collatText ]
+        , collatField
         ]
 
 

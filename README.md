@@ -6,6 +6,7 @@ https://rho-proj.uc.r.appspot.com
 * `yarn start`: serve
 * `yarn deploy`: deploy to Google App Engine
 * `yarn dev`: start dev server
+	* Pass `ELM_APP_DEFAULT_NETWORK=kovan` etc for testing, defaults to mainnet
 
 
 
