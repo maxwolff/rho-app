@@ -17,7 +17,7 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		rho: rhoAddr,
 	} = contractAddresses;
 
-	const eth_call = async (sig, args, to) => {
+	const call = async (sig, args, to) => {
 		const data = i.encodeFunctionData(sig, args);
 		const res = await ethereum.request({
 			method: "eth_call",
@@ -30,7 +30,6 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		sig,
 		args,
 		to,
-		ethereum,
 		gas = "0x7a120" /* 500k */
 	) => {
 		const data = i.encodeFunctionData(sig, args);
@@ -39,6 +38,25 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 			params: [{ to, data, from: ethereum.selectedAddress, gas }],
 		});
 	};
+
+	// const {cTokenExchangeRate} = await call("getSupplyCollateralState", [], rhoLensAddr);
+
+	// const toCTokens = amt => {
+	// 	const ctokens = BigInt(amt) * BigInt(1e18) / BigInt(cTokenExchangeRate);
+	// 	return toCTokenAmt(ctokens);
+	// }
+
+	// const toUnderlying = amt => {
+	// 	const underlying = BigInt(amt) * BigInt(cTokenExchangeRate) / BigInt(1e18);
+	// 	return toAmt(underlying);
+	// }
+
+	app.ports.unlockedLiquidity.subscribe(async () => {
+		const {lockedCollateral, supplierLiquidity, cTokenExchangeRate} = await call("getSupplyCollateralState", [], rhoLensAddr);
+		const unlocked = supplierLiquidity.sub(lockedCollateral);
+		const unlockedUnderlying = toUnderlying(unlocked);
+		app.ports.unlockedLiquidityReceiver.send(unlockedUnderlying.round(2).toString());
+	});
 
 	// PORT fns receive values as strings with decimals. ie "1.5" instead of 1.5e18, so we need to scale up before sending
 	app.ports.approveSend.subscribe(async () => {
@@ -57,18 +75,23 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		}
 	});
 
-	app.ports.supplyToCTokensCall.subscribe(async (underlyingAmt) => {
+	app.ports.toCTokensCall.subscribe(async ([name, underlyingAmt]) => {
 		const underlyingWei = toWeiStr(underlyingAmt);
 		const [cTokens] = await call("toCTokens", [underlyingWei], rhoLensAddr);
-		app.ports.supplyToCTokensReceiver.send(
+		app.ports.toCTokensReceiver.send(
+			[name,
 			toCTokenAmt(cTokens)
 				.round(2)
-				.toString()
+				.toString()]
 		);
 	});
 
 	app.ports.supplyCTokensSend.subscribe(async (supplyAmt) => {
 		await send("supply", [toCTokenWeiStr(supplyAmt)], rhoAddr);
+	});
+
+	app.ports.removeCTokensSend.subscribe(async ([removeAmt, shouldRemoveAll]) => {
+		await send("remove", [toCTokenWeiStr(removeAmt)], rhoAddr);
 	});
 
 	app.ports.orderInfoCall.subscribe(
@@ -101,6 +124,7 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 					protocolIsCollateralized,
 				});
 			} catch (e) {
+				console.log(e);
 				// return false if 0 liqudity
 				app.ports.orderInfoReceiver.send({
 					swapRate: "0",
@@ -138,27 +162,27 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		}
 	);
 
-	app.ports.supplyBalance.subscribe(async () => {
-		const { amount: supplyCTokens } = await call(
-			"supplyAccounts",
-			[ethereum.selectedAddress],
-			rhoAddr
-		);
-		const supplyCTokenAmt = toCTokenAmt(supplyCTokens)
-			.round(3)
-			.toString();
+	// app.ports.supplyBalance.subscribe(() => {
+		// console.log('here');
+		// console.log(supplyCTokensWei)
+		// const supplyCTokenAmt = toCTokenAmt(supplyCTokensWei)
+		// 	.round(3)
+		// 	.toString();
 
-		const [userCTokenBal] = await call(
-			"balanceOf",
-			[ethereum.selectedAddress],
-			cTokenAddr
-		);
-		const userCTokenAmt = toCTokenAmt(userCTokenBal)
-			.round(3)
-			.toString();
+		// const [userCTokenBal] = await call(
+		// 	"balanceOf",
+		// 	[ethereum.selectedAddress],
+		// 	cTokenAddr
+		// );
+		// const [supplyUnderlyingWei] = await call("toUnderlying", [supplyCTokensWei], rhoLensAddr);
+		// const supplyAmt = toAmt(supplyUnderlyingWei).round(2).toString();
 
-		app.ports.userBalancesReceiver.send([supplyCTokenAmt, userCTokenAmt]);
-	});
+		// const userCTokenAmt = toCTokenAmt(userCTokenBal)
+		// 	.round(3)
+		// 	.toString();
+
+		// app.ports.userBalancesReceiver.send([supplyCTokenAmt, supplyAmt, userCTokenAmt]);
+	// });
 
 	const getTimestampFromBlock = async (bn) => {
 		const provider = new ethers.providers.Web3Provider(ethereum);
@@ -245,11 +269,8 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 
 export const makeStaticPorts = async (host, app, contractAddresses) => {
 	const abi = [
-		"function notionalReceivingFixed() returns (uint)",
-		"function notionalPayingFixed() returns (uint)",
-		"function supplierLiquidity() returns (uint)",
-		"function avgFixedRateReceivingNew() returns (uint)",
-		"function avgFixedRatePayingNew() returns (uint)",
+		"function getSupplyCollateralState() returns (uint lockedCollateral, uint supplierLiquidity, uint cTokenExchangeRate)",
+		"function getMarkets() returns (uint notionalReceivingFixed, uint notionalPayingFixed, uint avgFixedRateReceiving, uint avgFixedRatePaying)"
 	];
 
 	const provider = new ethers.providers.JsonRpcProvider(host);
@@ -259,21 +280,28 @@ export const makeStaticPorts = async (host, app, contractAddresses) => {
 		rho: rhoAddr,
 	} = contractAddresses;
 	const rho = new ethers.Contract(rhoAddr, abi, provider);
+	const rhoLens = new ethers.Contract(rhoLensAddr, abi, provider);
 
 	app.ports.getMarkets.subscribe(async () => {
 		const promises = [
-			rho.callStatic.notionalReceivingFixed(),
-			rho.callStatic.notionalPayingFixed(),
-			rho.callStatic.supplierLiquidity(),
+			rhoLens.callStatic.getSupplyCollateralState(),
+			rhoLens.callStatic.getMarkets()
 		];
-		const [nrf, npf, sl] = await Promise.all(promises);
-		const notionalReceivingFixed = toAmt(nrf).toString();
-		const notionalPayingFixed = toAmt(npf).toString();
-		const supplierLiquidity = toCTokenAmt(sl).toString();
+		const [[lc, sl], [nrf, npf, afrr, afrp]] = await Promise.all(promises);
+		const notionalReceivingFixed = toAmt(nrf).round(2).toString();
+		const notionalPayingFixed = toAmt(npf).round(2).toString();
+		const avgFixedRateReceiving = toAmt(afrr).round(2).toString();
+		const avgFixedRatePaying = toAmt(afrp).round(2).toString();
+		const supplierLiquidity = toCTokenAmt(sl).round(2).toString();
+		const lockedCollateral = toCTokenAmt(lc).round(2).toString()
+
 		app.ports.getMarketsReceiver.send({
 			notionalReceivingFixed,
 			notionalPayingFixed,
+			avgFixedRatePaying,
+			avgFixedRateReceiving,
 			supplierLiquidity,
+			lockedCollateral
 		});
 	});
 };

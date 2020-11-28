@@ -10,9 +10,12 @@ export const i = new ethers.utils.Interface([
 	"function toCTokens(uint underlyingAmount) returns (uint cTokenAmount)",
 	"function toUnderlying(uint cTokenAmt) returns (uint underlyingAmount)",
 	"function getHypotheticalOrderInfo(bool userPayingFixed, uint notionalAmount) returns (uint swapFixedRateMantissa, uint userCollateralCTokens, uint userCollateralUnderlying, bool protocolIsCollateralized)",
+	"function getSupplyCollateralState() returns (uint lockedCollateral, uint supplierLiquidity, uint cTokenExchangeRate)",
+
 
 	// rho
 	"function supply(uint cTokenSupplyAmount)",
+	"function remove(uint removeCTokenAmount)",
 	"function openPayFixedSwap(uint notionalAmount, uint maximumFixedRateMantissa) returns (bytes32 swapHash)",
 	"function openReceiveFixedSwap(uint notionalAmount, uint minFixedRateMantissa) returns (bytes32 swapHash)",
 	"function supplyAccounts(address) returns (uint amount, uint lastBlock, uint index)",

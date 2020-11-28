@@ -60,8 +60,11 @@ getPage location =
                     Cmd.batch [ isConnected (), swapHistory () ]
 
                 App ->
-                    Cmd.batch [ isConnected (), isApprovedCall (), cTokenBalance (), supplyBalance () ]
+                    userSupplyBalance ()
 
+                --Cmd.batch
+                --[ --isConnected (), isApprovedCall (), cTokenBalance (),
+                --]
                 Markets ->
                     getMarkets ()
 
@@ -112,21 +115,6 @@ type alias HistoricalSwap =
     }
 
 
-type alias OrderInfoResponse =
-    { swapRate : String
-    , collatCToken : String
-    , collatDollars : String
-    , protocolIsCollateralized : Bool
-    }
-
-
-type alias GetMarketsResponse =
-    { notionalReceivingFixed : String
-    , notionalPayingFixed : String
-    , supplierLiquidity : String
-    }
-
-
 
 ---- MODEL ----
 
@@ -154,28 +142,39 @@ type alias Model =
     , swapRate : Decimal
     , isPayingFixed : Bool
     , supplyBalanceCToken : Decimal
+    , supplyBalanceDollars : Decimal
     , cTokenBalance : Decimal
     , protocolCollateralized : Bool
 
     --supply modal form
     , supplyCTokenAmount : Decimal
     , supplyDollarAmount : Decimal
+    , supplyUnderlying : String
     , isApproved : Bool
+
+    --remove modal form
+    , removeCTokenAmount : Decimal
+    , removeDollarAmount : Decimal
+    , unlockedLiquidity : String
+    , isRepayingMax : Bool
 
     -- history page
     , historicalSwaps : List HistoricalSwap
 
     -- markets
-    , notionalReceivingFixed : Decimal
-    , notionalPayingFixed : Decimal
-    , supplierLiquidity : Decimal
+    , notionalReceivingFixed : String
+    , notionalPayingFixed : String
+    , supplierLiquidity : String
+    , avgFixedRateReceiving : String
+    , avgFixedRatePaying : String
+    , lockedCollateral : String
     }
 
 
 init : Flags -> Url.Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url key =
     let
-        ( page, cmd, title ) =
+        ( page, cmds, title ) =
             getPage url
     in
     ( { key = key
@@ -194,17 +193,44 @@ init flags url key =
       , swapRate = Decimal.zero
       , isPayingFixed = True
       , supplyBalanceCToken = Decimal.zero
+      , supplyBalanceDollars = Decimal.zero
+      , supplyUnderlying = "-"
       , cTokenBalance = Decimal.zero
       , supplyCTokenAmount = Decimal.zero
       , supplyDollarAmount = Decimal.zero
+      , removeCTokenAmount = Decimal.zero
+      , removeDollarAmount = Decimal.zero
+      , isRepayingMax = False
+      , unlockedLiquidity = "-"
       , isApproved = False
       , historicalSwaps = []
-      , notionalReceivingFixed = Decimal.zero
-      , notionalPayingFixed = Decimal.zero
-      , supplierLiquidity = Decimal.zero
+      , notionalReceivingFixed = "-"
+      , notionalPayingFixed = "-"
+      , lockedCollateral = "-"
+      , supplierLiquidity = "-"
+      , avgFixedRateReceiving = "-"
+      , avgFixedRatePaying = "-"
       }
-    , cmd
+    , cmds
     )
+
+
+type alias OrderInfoResponse =
+    { swapRate : String
+    , collatCToken : String
+    , collatDollars : String
+    , protocolIsCollateralized : Bool
+    }
+
+
+type alias GetMarketsResponse =
+    { notionalReceivingFixed : String
+    , notionalPayingFixed : String
+    , supplierLiquidity : String
+    , avgFixedRateReceiving : String
+    , avgFixedRatePaying : String
+    , lockedCollateral : String
+    }
 
 
 
@@ -220,13 +246,7 @@ port isConnected : () -> Cmd msg
 port isApprovedCall : () -> Cmd msg
 
 
-port approveSend : () -> Cmd msg
-
-
-port supplyCTokensSend : String -> Cmd msg
-
-
-port supplyToCTokensCall : String -> Cmd msg
+port toCTokensCall : ( String, String ) -> Cmd msg
 
 
 port orderInfoCall : ( Bool, String ) -> Cmd msg
@@ -235,13 +255,25 @@ port orderInfoCall : ( Bool, String ) -> Cmd msg
 port swapHistory : () -> Cmd msg
 
 
-port openSwapSend : ( Bool, String ) -> Cmd msg
-
-
-port supplyBalance : () -> Cmd msg
+port userSupplyBalance : () -> Cmd msg
 
 
 port cTokenBalance : () -> Cmd msg
+
+
+port unlockedLiquidity : () -> Cmd msg
+
+
+port approveSend : () -> Cmd msg
+
+
+port supplyCTokensSend : String -> Cmd msg
+
+
+port removeCTokensSend : ( String, Bool ) -> Cmd msg
+
+
+port openSwapSend : ( Bool, String ) -> Cmd msg
 
 
 port closeSwapSend : String -> Cmd msg
@@ -256,7 +288,7 @@ port connectReceiver : (( String, String ) -> msg) -> Sub msg
 port enableReceiver : (Bool -> msg) -> Sub msg
 
 
-port supplyToCTokensReceiver : (String -> msg) -> Sub msg
+port toCTokensReceiver : (( String, String ) -> msg) -> Sub msg
 
 
 port orderInfoReceiver : (OrderInfoResponse -> msg) -> Sub msg
@@ -265,10 +297,13 @@ port orderInfoReceiver : (OrderInfoResponse -> msg) -> Sub msg
 port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
 
 
-port userBalancesReceiver : (( String, String ) -> msg) -> Sub msg
+port userBalancesReceiver : (( String, String, String ) -> msg) -> Sub msg
 
 
 port getMarketsReceiver : (GetMarketsResponse -> msg) -> Sub msg
+
+
+port unlockedLiquidityReceiver : (String -> msg) -> Sub msg
 
 
 
@@ -289,11 +324,12 @@ subscriptions model =
     Sub.batch
         [ connectReceiver HasConnected
         , enableReceiver Approved
-        , supplyToCTokensReceiver SupplyCTokens
+        , toCTokensReceiver ToCTokens
         , orderInfoReceiver OrderInfo
         , swapHistoryReceiver SwapHistory
         , userBalancesReceiver UserBalances
         , getMarketsReceiver MarketsInfo
+        , unlockedLiquidityReceiver UnlockedLiquidity
         , tickCmd
         ]
 
@@ -312,8 +348,10 @@ type Msg
     | HasConnected ( String, String )
     | ConnectCmd
     | SupplyAmountInput String
-    | SupplyCTokens String
+    | RemoveAmountInput String
+    | ToCTokens ( String, String )
     | SupplyTx
+    | RemoveTx
     | OpenTx
     | CloseTx String
     | Tick Time.Posix
@@ -322,8 +360,10 @@ type Msg
     | TogglePayingFixed
     | IsUserConnected Bool
     | SwapHistory (List HistoricalSwap)
-    | UserBalances ( String, String )
+    | UserBalances ( String, String, String )
     | MarketsInfo GetMarketsResponse
+    | UnlockedLiquidity String
+    | SetRepayingMax
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -347,12 +387,19 @@ update msg model =
                     ( { model | connectionStatus = Connected { network = network, selectedAddr = addr } }, Cmd.none )
 
         SelectModal action ->
+            let
+                selectedModel =
+                    { model | actionSelected = action }
+            in
             case action of
                 Close ->
-                    ( { model | actionSelected = action }, swapHistory () )
+                    ( selectedModel, swapHistory () )
+
+                Remove ->
+                    ( selectedModel, Cmd.batch [ swapHistory (), unlockedLiquidity () ] )
 
                 _ ->
-                    ( { model | actionSelected = action }, Cmd.none )
+                    ( selectedModel, Cmd.none )
 
         TogglePayingFixed ->
             let
@@ -375,13 +422,34 @@ update msg model =
                 ( decAmt, strAmt ) =
                     formatInput amt
             in
-            ( { model | supplyDollarAmount = decAmt }, supplyToCTokensCall strAmt )
+            ( { model | supplyDollarAmount = decAmt }, toCTokensCall ( "supply", strAmt ) )
 
-        SupplyCTokens ctokens ->
-            ( { model | supplyCTokenAmount = toDec ctokens model.supplyCTokenAmount }, Cmd.none )
+        RemoveAmountInput amt ->
+            let
+                ( decAmt, strAmt ) =
+                    formatInput amt
+            in
+            ( { model | removeDollarAmount = decAmt }, toCTokensCall ( "remove", strAmt ) )
+
+        ToCTokens ( name, ctokens ) ->
+            case name of
+                "supply" ->
+                    ( { model | supplyCTokenAmount = toDec ctokens model.supplyCTokenAmount }, Cmd.none )
+
+                "remove" ->
+                    ( { model | removeCTokenAmount = toDec ctokens model.removeCTokenAmount }, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
 
         SupplyTx ->
             ( model, supplyCTokensSend (Decimal.toString model.supplyCTokenAmount) )
+
+        SetRepayingMax ->
+            ( { model | isRepayingMax = True, removeCTokenAmount = model.supplyCTokenAmount, removeDollarAmount = model.supplyDollarAmount }, Cmd.none )
+
+        RemoveTx ->
+            ( model, removeCTokensSend ( Decimal.toString model.removeCTokenAmount, False ) )
 
         NotionalAmountInput notional ->
             let
@@ -413,21 +481,14 @@ update msg model =
             -- todo: put into decs
             ( { model | historicalSwaps = resp }, Cmd.none )
 
-        UserBalances ( supplyBal, cTokenBal ) ->
-            ( { model | supplyBalanceCToken = toDec supplyBal model.supplyBalanceCToken, cTokenBalance = toDec cTokenBal model.cTokenBalance }, Cmd.none )
+        UserBalances ( supplyBal, supplyUnderlying, cTokenBal ) ->
+            ( { model | supplyUnderlying = supplyUnderlying, supplyBalanceCToken = toDec supplyBal model.supplyBalanceCToken, cTokenBalance = toDec cTokenBal model.cTokenBalance }, Cmd.none )
 
         MarketsInfo resp ->
-            let
-                nrfDec =
-                    toDec resp.notionalReceivingFixed model.notionalReceivingFixed
+            ( { model | lockedCollateral = resp.lockedCollateral, notionalReceivingFixed = resp.notionalReceivingFixed, notionalPayingFixed = resp.notionalPayingFixed, avgFixedRatePaying = resp.avgFixedRatePaying, avgFixedRateReceiving = resp.avgFixedRateReceiving, supplierLiquidity = resp.supplierLiquidity }, Cmd.none )
 
-                npfDec =
-                    toDec resp.notionalPayingFixed model.notionalPayingFixed
-
-                slDec =
-                    toDec resp.supplierLiquidity model.supplierLiquidity
-            in
-            ( { model | notionalReceivingFixed = nrfDec, notionalPayingFixed = npfDec, supplierLiquidity = slDec }, Cmd.none )
+        UnlockedLiquidity unlocked ->
+            ( { model | unlockedLiquidity = unlocked }, Cmd.none )
 
         Tick _ ->
             ( model, Cmd.batch [ isApprovedCall () ] )
@@ -471,13 +532,13 @@ view model =
                     ]
 
                 Markets ->
-                    [ header model True
+                    [ header model False
                     , marketsPage model
                     ]
 
                 Landing ->
                     [ header model False
-                    , landing (LandingStats True)
+                    , landing
                     ]
     in
     { title = model.title
@@ -526,12 +587,8 @@ header model showMetamask =
         ]
 
 
-type alias LandingStats =
-    { placeHolder : Bool }
-
-
-landing : LandingStats -> Html Msg
-landing stats =
+landing : Html Msg
+landing =
     div [ id "modal" ]
         [ div
             [ class "landing-title" ]
@@ -545,9 +602,11 @@ marketsPage : Model -> Html Msg
 marketsPage model =
     div [ id "modal" ]
         [ h3 [ id "title" ] [ text "Market Overview" ]
-        , div [ class "modal-field" ] [ text ("Swaps Receiving Fixed: " ++ Decimal.toString model.notionalReceivingFixed) ]
-        , div [ class "modal-field" ] [ text ("Swaps Paying Fixed: " ++ Decimal.toString model.notionalPayingFixed) ]
-        , div [ class "modal-field" ] [ text ("Total Liquidity: " ++ Decimal.toString model.supplierLiquidity) ]
+        , div [ class "modal-field" ] [ text ("Swaps Receiving Fixed: " ++ model.notionalReceivingFixed) ]
+        , div [ class "modal-field" ] [ text ("Fixed Rate Receiving: " ++ model.avgFixedRateReceiving) ]
+        , div [ class "modal-field" ] [ text ("Swaps Paying Fixed: " ++ model.notionalPayingFixed) ]
+        , div [ class "modal-field" ] [ text ("Fixed Rate Paying: " ++ model.avgFixedRatePaying) ]
+        , div [ class "modal-field" ] [ text ("Total Liquidity: " ++ model.supplierLiquidity) ]
         ]
 
 
@@ -604,6 +663,9 @@ modal model =
                         Supply ->
                             button [ onClick SupplyTx, class "ctaButton" ] [ text "Supply Liquidity" ]
 
+                        Remove ->
+                            button [ onClick RemoveTx, class "ctaButton" ] [ text "Remove Liquidity" ]
+
                         _ ->
                             div [] []
 
@@ -619,10 +681,10 @@ modal model =
                     div [] [ supplyModal model, ctaButton ]
 
                 Close ->
-                    div [] [ closeModal model ]
+                    div [] [ closeModal model, ctaButton ]
 
-                _ ->
-                    div [] []
+                Remove ->
+                    div [] [ removeModal model, ctaButton ]
     in
     div [ id "modal" ]
         [ h3 [ id "title" ] [ text (model.duration ++ " day " ++ model.collateral ++ " Interest Rate Swaps") ]
@@ -639,22 +701,46 @@ modal model =
 supplyModal : Model -> Html Msg
 supplyModal model =
     div [ class "form-elem" ]
-        [ div [ class "modal-field" ] [ text ("Current Supply Balance: " ++ (Decimal.toString model.supplyBalanceCToken ++ " " ++ model.collateral)) ]
+        [ userSupplyField model
         , inputForm "Supply Amount : $" "0" (Decimal.toString model.supplyDollarAmount) SupplyAmountInput
-        , div [ class "modal-field" ] [ text (Decimal.toString model.supplyCTokenAmount ++ " " ++ model.collateral) ]
+        , div [ class "modal-field" ] [ text ("Supply: " ++ Decimal.toString model.supplyCTokenAmount ++ " " ++ model.collateral) ]
         ]
+
+
+removeModal : Model -> Html Msg
+removeModal model =
+    div [ class "form-elem" ]
+        [ userSupplyField model
+        , div [ class "modal-field" ] [ text ("Liquidity Available: " ++ model.unlockedLiquidity ++ " " ++ model.underlying) ]
+        , div [ class "modal-field" ]
+            [ label []
+                [ text "Remove Amount : $"
+                , input [ type_ "number", attribute "placeholder" "0", value (Decimal.toString model.removeDollarAmount), onInput RemoveAmountInput, attribute "autofocus" "autofocus" ] []
+                ]
+            , button [ id "toggle-remove-max", onClick SetRepayingMax ] [ text "max" ]
+            ]
+        , div [ class "modal-field" ] [ text ("Remove: " ++ Decimal.toString model.removeCTokenAmount ++ " " ++ model.collateral) ]
+        ]
+
+
+userSupplyField : Model -> Html Msg
+userSupplyField model =
+    div [ class "modal-field" ] [ text ("Supply Balance: $" ++ model.supplyUnderlying ++ " (" ++ Decimal.toString model.supplyBalanceCToken ++ " " ++ model.collateral ++ ")") ]
 
 
 closeModal : Model -> Html Msg
 closeModal model =
     let
+        closeable =
+            List.filter (\swap -> swap.userPayout == Nothing) model.historicalSwaps
+
         elems =
-            case model.historicalSwaps of
+            case closeable of
                 [] ->
                     [ div [ class "modal-field" ] [ text "No closeable swaps" ] ]
 
                 swaps ->
-                    List.map closeElem (List.filter (\swap -> swap.userPayout == Nothing) swaps)
+                    List.map closeElem closeable
     in
     div [] elems
 
