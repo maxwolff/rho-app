@@ -14,6 +14,7 @@ export const i = new ethers.utils.Interface([
 
 
 	// rho
+	"function liquidityLimit() returns (uint)",
 	"function supply(uint cTokenSupplyAmount)",
 	"function remove(uint removeCTokenAmount)",
 	"function openPayFixedSwap(uint notionalAmount, uint maximumFixedRateMantissa) returns (bytes32 swapHash)",

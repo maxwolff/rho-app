@@ -3,7 +3,7 @@ port module Main exposing (..)
 import Browser
 import Browser.Navigation as Nav
 import Decimal exposing (Decimal)
-import Html exposing (Html, a, button, div, form, h1, h3, h4, input, label, li, option, select, text, ul)
+import Html exposing (Html, a, button, div, footer, form, h1, h3, h4, input, label, li, option, select, text, ul)
 import Html.Attributes exposing (attribute, class, height, href, id, placeholder, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Time
@@ -60,11 +60,8 @@ getPage location =
                     Cmd.batch [ isConnected (), swapHistory () ]
 
                 App ->
-                    userSupplyBalance ()
+                    Cmd.batch [ isConnected (), isApprovedCall (), cTokenBalance (), supplyBalance () ]
 
-                --Cmd.batch
-                --[ --isConnected (), isApprovedCall (), cTokenBalance (),
-                --]
                 Markets ->
                     getMarkets ()
 
@@ -141,9 +138,9 @@ type alias Model =
     , collateralDollars : Decimal
     , swapRate : Decimal
     , isPayingFixed : Bool
-    , supplyBalanceCToken : Decimal
+    , supplyBalanceCToken : String
     , supplyBalanceDollars : Decimal
-    , cTokenBalance : Decimal
+    , cTokenBalance : String
     , protocolCollateralized : Bool
 
     --supply modal form
@@ -151,6 +148,7 @@ type alias Model =
     , supplyDollarAmount : Decimal
     , supplyUnderlying : String
     , isApproved : Bool
+    , isAboveLimit : Bool
 
     --remove modal form
     , removeCTokenAmount : Decimal
@@ -192,10 +190,11 @@ init flags url key =
       , collateralDollars = Decimal.zero
       , swapRate = Decimal.zero
       , isPayingFixed = True
-      , supplyBalanceCToken = Decimal.zero
+      , supplyBalanceCToken = "-"
       , supplyBalanceDollars = Decimal.zero
+      , isAboveLimit = False
       , supplyUnderlying = "-"
-      , cTokenBalance = Decimal.zero
+      , cTokenBalance = "-"
       , supplyCTokenAmount = Decimal.zero
       , supplyDollarAmount = Decimal.zero
       , removeCTokenAmount = Decimal.zero
@@ -233,6 +232,13 @@ type alias GetMarketsResponse =
     }
 
 
+type alias UserBalancesResponse =
+    { supplyBalanceCTokens : String
+    , supplyBalanceUnderlying : String
+    , userCTokenBalance : String
+    }
+
+
 
 -- PORTS
 
@@ -255,7 +261,7 @@ port orderInfoCall : ( Bool, String ) -> Cmd msg
 port swapHistory : () -> Cmd msg
 
 
-port userSupplyBalance : () -> Cmd msg
+port supplyBalance : () -> Cmd msg
 
 
 port cTokenBalance : () -> Cmd msg
@@ -282,6 +288,9 @@ port closeSwapSend : String -> Cmd msg
 port getMarkets : () -> Cmd msg
 
 
+port isAboveLimit : String -> Cmd msg
+
+
 port connectReceiver : (( String, String ) -> msg) -> Sub msg
 
 
@@ -297,13 +306,16 @@ port orderInfoReceiver : (OrderInfoResponse -> msg) -> Sub msg
 port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
 
 
-port userBalancesReceiver : (( String, String, String ) -> msg) -> Sub msg
+port userBalancesReceiver : (UserBalancesResponse -> msg) -> Sub msg
 
 
 port getMarketsReceiver : (GetMarketsResponse -> msg) -> Sub msg
 
 
 port unlockedLiquidityReceiver : (String -> msg) -> Sub msg
+
+
+port aboveLimitReceiver : (Bool -> msg) -> Sub msg
 
 
 
@@ -330,6 +342,7 @@ subscriptions model =
         , userBalancesReceiver UserBalances
         , getMarketsReceiver MarketsInfo
         , unlockedLiquidityReceiver UnlockedLiquidity
+        , aboveLimitReceiver AboveLimit
         , tickCmd
         ]
 
@@ -360,10 +373,11 @@ type Msg
     | TogglePayingFixed
     | IsUserConnected Bool
     | SwapHistory (List HistoricalSwap)
-    | UserBalances ( String, String, String )
+    | UserBalances UserBalancesResponse
     | MarketsInfo GetMarketsResponse
     | UnlockedLiquidity String
     | SetRepayingMax
+    | AboveLimit Bool
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -422,14 +436,14 @@ update msg model =
                 ( decAmt, strAmt ) =
                     formatInput amt
             in
-            ( { model | supplyDollarAmount = decAmt }, toCTokensCall ( "supply", strAmt ) )
+            ( { model | supplyDollarAmount = decAmt }, Cmd.batch [ toCTokensCall ( "supply", strAmt ), isAboveLimit strAmt ] )
 
         RemoveAmountInput amt ->
             let
                 ( decAmt, strAmt ) =
                     formatInput amt
             in
-            ( { model | removeDollarAmount = decAmt }, toCTokensCall ( "remove", strAmt ) )
+            ( { model | removeDollarAmount = decAmt, isRepayingMax = False }, toCTokensCall ( "remove", strAmt ) )
 
         ToCTokens ( name, ctokens ) ->
             case name of
@@ -446,17 +460,17 @@ update msg model =
             ( model, supplyCTokensSend (Decimal.toString model.supplyCTokenAmount) )
 
         SetRepayingMax ->
-            ( { model | isRepayingMax = True, removeCTokenAmount = model.supplyCTokenAmount, removeDollarAmount = model.supplyDollarAmount }, Cmd.none )
+            ( { model | isRepayingMax = True, removeCTokenAmount = toDec model.supplyBalanceCToken model.removeCTokenAmount, removeDollarAmount = toDec model.supplyUnderlying model.removeDollarAmount }, Cmd.none )
 
         RemoveTx ->
-            ( model, removeCTokensSend ( Decimal.toString model.removeCTokenAmount, False ) )
+            ( model, removeCTokensSend ( Decimal.toString model.removeCTokenAmount, model.isRepayingMax ) )
 
         NotionalAmountInput notional ->
             let
                 ( decAmt, strAmt ) =
                     formatInput notional
             in
-            ( { model | notionalAmount = decAmt }, orderInfoCall ( model.isPayingFixed, strAmt ) )
+            ( { model | notionalAmount = decAmt }, Cmd.batch [ orderInfoCall ( model.isPayingFixed, strAmt ), isAboveLimit "0" ] )
 
         OrderInfo resp ->
             let
@@ -481,14 +495,17 @@ update msg model =
             -- todo: put into decs
             ( { model | historicalSwaps = resp }, Cmd.none )
 
-        UserBalances ( supplyBal, supplyUnderlying, cTokenBal ) ->
-            ( { model | supplyUnderlying = supplyUnderlying, supplyBalanceCToken = toDec supplyBal model.supplyBalanceCToken, cTokenBalance = toDec cTokenBal model.cTokenBalance }, Cmd.none )
+        UserBalances resp ->
+            ( { model | supplyUnderlying = resp.supplyBalanceUnderlying, supplyBalanceCToken = resp.supplyBalanceCTokens, cTokenBalance = resp.userCTokenBalance }, Cmd.none )
 
         MarketsInfo resp ->
             ( { model | lockedCollateral = resp.lockedCollateral, notionalReceivingFixed = resp.notionalReceivingFixed, notionalPayingFixed = resp.notionalPayingFixed, avgFixedRatePaying = resp.avgFixedRatePaying, avgFixedRateReceiving = resp.avgFixedRateReceiving, supplierLiquidity = resp.supplierLiquidity }, Cmd.none )
 
         UnlockedLiquidity unlocked ->
             ( { model | unlockedLiquidity = unlocked }, Cmd.none )
+
+        AboveLimit aboveLim ->
+            ( { model | isAboveLimit = aboveLim }, Cmd.none )
 
         Tick _ ->
             ( model, Cmd.batch [ isApprovedCall () ] )
@@ -542,7 +559,7 @@ view model =
                     ]
     in
     { title = model.title
-    , body = [ div [ id "container" ] body ]
+    , body = [ div [ id "container" ] (List.append body [ footerDiv ]) ]
     }
 
 
@@ -559,7 +576,7 @@ header model showMetamask =
                                     connection.network ++ " " ++ String.slice 0 4 connection.selectedAddr ++ ".." ++ String.slice -4 -1 connection.selectedAddr
 
                                 collatText =
-                                    Decimal.toString model.cTokenBalance ++ " " ++ model.collateral
+                                    model.cTokenBalance ++ " " ++ model.collateral
                             in
                             div [ id "connected" ] [ div [ id "connectElem" ] [ text netText ], div [ id "connectElem" ] [ text collatText ] ]
 
@@ -593,7 +610,15 @@ landing =
         [ div
             [ class "landing-title" ]
             [ h3 [] [ text "Rho is a protocol for interest rate swaps" ] ]
-        , ul [ class "landing-list" ] [ li [] [ text "You can use it for things" ] ]
+        , ul [ class "landing-list" ]
+            [ li []
+                [ text "You can use it for things" ]
+            , li [ class "underlineLink" ]
+                [ a
+                    [ href "https://app.compound.finance/" ]
+                    [ text "get cDAI" ]
+                ]
+            ]
         , button [ class "ctaButton", id "connectButton" ] [ a [ href "/app" ] [ text "App" ] ]
         ]
 
@@ -672,18 +697,27 @@ modal model =
                 False ->
                     button [ onClick ApproveCmd, class "ctaButton" ] [ text ("Enable " ++ model.collateral) ]
 
+        liquidityLimit =
+            div [ class "modal-field", class "warning" ] [ text "Above Liquidity Safety Limit, Action Paused" ]
+
         selectedModal =
-            case action of
-                Open ->
+            case ( action, model.isAboveLimit ) of
+                ( Open, False ) ->
                     div [] [ openModal model, ctaButton ]
 
-                Supply ->
+                ( Supply, False ) ->
                     div [] [ supplyModal model, ctaButton ]
 
-                Close ->
+                ( Open, True ) ->
+                    div [] [ openModal model, liquidityLimit ]
+
+                ( Supply, True ) ->
+                    div [] [ supplyModal model, liquidityLimit ]
+
+                ( Close, _ ) ->
                     div [] [ closeModal model, ctaButton ]
 
-                Remove ->
+                ( Remove, _ ) ->
                     div [] [ removeModal model, ctaButton ]
     in
     div [ id "modal" ]
@@ -725,7 +759,7 @@ removeModal model =
 
 userSupplyField : Model -> Html Msg
 userSupplyField model =
-    div [ class "modal-field" ] [ text ("Supply Balance: $" ++ model.supplyUnderlying ++ " (" ++ Decimal.toString model.supplyBalanceCToken ++ " " ++ model.collateral ++ ")") ]
+    div [ class "modal-field" ] [ text ("Supply Balance: $" ++ model.supplyUnderlying ++ " (" ++ model.supplyBalanceCToken ++ " " ++ model.collateral ++ ")") ]
 
 
 closeModal : Model -> Html Msg
@@ -843,6 +877,14 @@ toDec newStr default =
 
         ( n, Just newDec ) ->
             newDec
+
+
+footerDiv : Html Msg
+footerDiv =
+    ul [ id "footer" ]
+        [ li [ class "footer-elem" ] [ a [ href "https://twitter.com/rho_finance" ] [ text "Twitter " ] ]
+        , li [ class "footer-elem" ] [ a [ href "https://github.com/Rho-protocol" ] [ text "Github " ] ]
+        ]
 
 
 formatInput : String -> ( Decimal, String )

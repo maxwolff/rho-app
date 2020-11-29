@@ -2,14 +2,14 @@
 
 https://rho-proj.uc.r.appspot.com
 
-
-* `yarn start`: serve
-* `yarn deploy`: deploy to Google App Engine
 * `yarn dev`: start dev server
 	* Pass `ELM_APP_DEFAULT_NETWORK=kovan` etc for testing, defaults to mainnet
+* `yarn build`: build an optimized version
+* `yarn start`: serve the build
+* `yarn deploy`: deploy to Google App Engine
 
 
-
+Bugs: 
 * request metamask and then decline breaks, needs reload
 
 
