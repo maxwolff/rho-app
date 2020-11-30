@@ -22,7 +22,7 @@ export const i = new ethers.utils.Interface([
 	"function supplyAccounts(address) returns (uint amount, uint lastBlock, uint index)",
 	"function close(bool userPayingFixed, uint benchmarkIndexInit, uint initBlock, uint swapFixedRateMantissa, uint notionalAmount, uint userCollateralCTokens, address owner)",
 	"event OpenSwap(bytes32 indexed swapHash, bool userPayingFixed, uint benchmarkIndexInit, uint initBlock, uint swapFixedRateMantissa, uint notionalAmount, uint userCollateralCTokens, address indexed owner)",
-	"event CloseSwap(bytes32 indexed swapHash, address indexed owner, uint userPayout, uint benchmarkIndexFinal)"
+	"event CloseSwap(bytes32 indexed swapHash, address indexed owner, uint userPayout, uint penalty, uint benchmarkIndexFinal)"
 ]);
 
 export const bn = (str) => {

@@ -158,15 +158,14 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		}
 	);
 
-	// hypothetical $ supply amount
+	// hypothetical underlying supply amount
 	app.ports.isAboveLimit.subscribe(async (amt) => {
 		let [ {supplierLiquidity}, [liquidityLimit]] = await Promise.all([
 			call("getSupplyCollateralState", [], rhoLensAddr),
 			call("liquidityLimit", [], rhoAddr)
 		]);
-		const [supplyCTokens] = await call("toUnderlying", [amt], rhoLensAddr);
-		const supplyCTokenWei = bn(toCTokenWeiStr(supplyCTokens));
-		const isAboveLimit = liquidityLimit.lt(supplierLiquidity.add(supplyCTokens));
+		const [supplyCTokenWei] = await call("toCTokens", [toWeiStr(amt)], rhoLensAddr);
+		const isAboveLimit = liquidityLimit.lt(supplierLiquidity.add(supplyCTokenWei));
 		app.ports.aboveLimitReceiver.send(isAboveLimit) 
 	});
 
@@ -265,7 +264,7 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 		const allEvents = openEvents.concat(closeEvents);
 		const closeArgsArr = [];
 		const [displayEvents, closeableSwaps] = await processEvents(allEvents);
-
+		console.log(allEvents)
 		app.ports.swapHistoryReceiver.send(Object.values(displayEvents));
 		app.ports.closeSwapSend.subscribe(async (swapHash) => {
 			const swap = closeableSwaps[swapHash];

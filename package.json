@@ -2,7 +2,7 @@
   "license": "ISC",
   "dependencies": {
     "ethers": "^5.0.17",
-    "express": "^4.17.1"
+    "serve": "^11.3.2"
   },
   "devDependencies": {
     "@babel/core": "^7.10.0",
@@ -11,7 +11,7 @@
     "node-sass-chokidar": "^1.5.0"
   },
   "scripts": {
-    "start": "node app.js",
+    "start": "npx serve -s build",
     "dev": "yarn watch-css & elm-app start",
     "build-css": "node-sass-chokidar ./src -o ./build-css",
     "watch-css": "yarn run build-css && node-sass-chokidar ./src -o ./build-css --watch",
