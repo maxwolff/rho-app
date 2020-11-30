@@ -58,6 +58,10 @@ input {
   border-bottom: .1em $dark-grey;
 }
 
+li {
+    margin-top: 1.5em;
+}
+
 #container {
   font-size: $med-size;
   margin: 0;
@@ -125,6 +129,20 @@ input {
   width: fit-content;
 }
 
+#footer {
+  display: inline;
+  padding: 1em;
+  grid-column: left-content / right-content;
+  grid-row: end-content / bottom;
+}
+
+#toggle-swap-type {
+  border: none;
+  @include rounded-border;
+  background-color: $purple;
+  padding-right: 1.5em;
+  color: $cta-text;
+}
 
 // Modal
 
@@ -138,13 +156,6 @@ input {
   color: $warn-red;
 }
 
-#toggle-swap-type {
-  border: none;
-  @include rounded-border;
-  background-color: $purple;
-  padding-right: 1.5em;
-  color: $cta-text;
-}
 
 // Swap History
 
@@ -159,6 +170,10 @@ input {
   text-align: left;
   display: inline;
   font-weight: bold; 
+}
+
+.underlineLink {
+  text-decoration: underline;
 }
 
 .swapTitleOpen {
@@ -182,6 +197,13 @@ input {
   text-align: center;
   font-weight: bold; }
 
+
+// Footer
+
+.footer-elem {
+  margin: 0;
+  display: inline;
+}
 
 
 // Shared
