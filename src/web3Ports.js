@@ -189,7 +189,7 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 			.toString();
 
 		const userCTokenBalance = toCTokenAmt(userCTokenBal)
-			.round(3)
+			.round(1)
 			.toString();
 
 		app.ports.userBalancesReceiver.send({
@@ -223,11 +223,13 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 			notional: toAmt(args.notionalAmount).toString(),
 			rate: toPercFromBlockMantissa(args.swapFixedRateMantissa),
 			userPayingFixed: args.userPayingFixed,
-			userPayout: null,
+			userPayout: null, // flag on if the swap was closed
+			closeable: false
 		};
 	};
 
-	const processEvents = async (allEvents) => {
+	const processEvents = async (allEvents, bn) => {
+		const SWAP_MIN_DURATION = 45500;
 		const displayEvents = {};
 		const closableEvents = {};
 		for (let e of allEvents) {
@@ -235,7 +237,10 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 			const swapHash = args.swapHash;
 			if (event == "OpenSwap") {
 				displayEvents[swapHash] = await argsToDisplay(args);
-				closableEvents[swapHash] = args;
+				const duration = BigInt(bn) - BigInt(args.initBlock);
+				if (duration > BigInt(SWAP_MIN_DURATION)) {
+					closableEvents[swapHash] = args;
+				}
 			} else {
 				displayEvents[swapHash].userPayout = toAmt(args.userPayout)
 					.round(4)
@@ -243,6 +248,11 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 				delete closableEvents[swapHash];
 			}
 		}
+
+		for (let swapHash of Object.keys(closableEvents)) {
+			displayEvents[swapHash].closeable = true;
+		}
+
 		return [displayEvents, closableEvents];
 	};
 
@@ -263,8 +273,8 @@ export const makeWeb3Ports = async (ethereum, app, contractAddresses) => {
 
 		const allEvents = openEvents.concat(closeEvents);
 		const closeArgsArr = [];
-		const [displayEvents, closeableSwaps] = await processEvents(allEvents);
-		console.log(allEvents)
+		const bn = await provider.getBlockNumber();
+		const [displayEvents, closeableSwaps] = await processEvents(allEvents, bn);
 		app.ports.swapHistoryReceiver.send(Object.values(displayEvents));
 		app.ports.closeSwapSend.subscribe(async (swapHash) => {
 			const swap = closeableSwaps[swapHash];
@@ -286,6 +296,7 @@ export const makeStaticPorts = async (host, app, contractAddresses) => {
 	const abi = [
 		"function getSupplyCollateralState() returns (uint lockedCollateral, uint supplierLiquidity, uint cTokenExchangeRate)",
 		"function getMarkets() returns (uint notionalReceivingFixed, uint notionalPayingFixed, uint avgFixedRateReceiving, uint avgFixedRatePaying)",
+		"function liquidityLimit() returns (uint)"
 	];
 
 	const provider = new ethers.providers.JsonRpcProvider(host);
@@ -301,26 +312,29 @@ export const makeStaticPorts = async (host, app, contractAddresses) => {
 		const promises = [
 			rhoLens.callStatic.getSupplyCollateralState(),
 			rhoLens.callStatic.getMarkets(),
+			rho.callStatic.liquidityLimit()
 		];
-		const [[lc, sl], [nrf, npf, afrr, afrp]] = await Promise.all(promises);
+		const [[lc, sl, ex], [nrf, npf, afrr, afrp], limit] = await Promise.all(promises);
+
+		const toUnderlyingDisplayAmt = (ctokens) => {
+			const underlyingWei = BigInt(ex) * BigInt(ctokens) / BigInt(1e18);
+			return toAmt(underlyingWei).round(2).toString();
+		};
+
 		const notionalReceivingFixed = toAmt(nrf)
 			.round(2)
 			.toString();
 		const notionalPayingFixed = toAmt(npf)
 			.round(2)
 			.toString();
-		const avgFixedRateReceiving = toAmt(afrr)
-			.round(2)
+		const avgFixedRateReceiving = toPercFromBlockMantissa(afrr)
 			.toString();
-		const avgFixedRatePaying = toAmt(afrp)
-			.round(2)
+		const avgFixedRatePaying = toPercFromBlockMantissa(afrp)
 			.toString();
-		const supplierLiquidity = toCTokenAmt(sl)
-			.round(2)
-			.toString();
-		const lockedCollateral = toCTokenAmt(lc)
-			.round(2)
-			.toString();
+
+		const supplierLiquidity = toUnderlyingDisplayAmt(sl)
+		const lockedCollateral = toUnderlyingDisplayAmt(lc)
+		const liquidityLimit = toUnderlyingDisplayAmt(limit);
 
 		app.ports.getMarketsReceiver.send({
 			notionalReceivingFixed,
@@ -329,6 +343,7 @@ export const makeStaticPorts = async (host, app, contractAddresses) => {
 			avgFixedRateReceiving,
 			supplierLiquidity,
 			lockedCollateral,
+			liquidityLimit
 		});
 	});
 };

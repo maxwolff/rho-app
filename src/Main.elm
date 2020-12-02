@@ -108,6 +108,7 @@ type alias HistoricalSwap =
     , rate : String
     , userPayingFixed : Bool
     , userPayout : Maybe String
+    , closeable : Bool
     , swapHash : String
     }
 
@@ -158,14 +159,7 @@ type alias Model =
 
     -- history page
     , historicalSwaps : List HistoricalSwap
-
-    -- markets
-    , notionalReceivingFixed : String
-    , notionalPayingFixed : String
-    , supplierLiquidity : String
-    , avgFixedRateReceiving : String
-    , avgFixedRatePaying : String
-    , lockedCollateral : String
+    , marketData : MarketData
     }
 
 
@@ -203,12 +197,15 @@ init flags url key =
       , unlockedLiquidity = "-"
       , isApproved = False
       , historicalSwaps = []
-      , notionalReceivingFixed = "-"
-      , notionalPayingFixed = "-"
-      , lockedCollateral = "-"
-      , supplierLiquidity = "-"
-      , avgFixedRateReceiving = "-"
-      , avgFixedRatePaying = "-"
+      , marketData =
+            { notionalReceivingFixed = "-"
+            , notionalPayingFixed = "-"
+            , lockedCollateral = "-"
+            , supplierLiquidity = "-"
+            , avgFixedRateReceiving = "-"
+            , avgFixedRatePaying = "-"
+            , liquidityLimit = "-"
+            }
       }
     , cmds
     )
@@ -222,13 +219,14 @@ type alias OrderInfoResponse =
     }
 
 
-type alias GetMarketsResponse =
+type alias MarketData =
     { notionalReceivingFixed : String
     , notionalPayingFixed : String
     , supplierLiquidity : String
     , avgFixedRateReceiving : String
     , avgFixedRatePaying : String
     , lockedCollateral : String
+    , liquidityLimit : String
     }
 
 
@@ -309,7 +307,7 @@ port swapHistoryReceiver : (List HistoricalSwap -> msg) -> Sub msg
 port userBalancesReceiver : (UserBalancesResponse -> msg) -> Sub msg
 
 
-port getMarketsReceiver : (GetMarketsResponse -> msg) -> Sub msg
+port getMarketsReceiver : (MarketData -> msg) -> Sub msg
 
 
 port unlockedLiquidityReceiver : (String -> msg) -> Sub msg
@@ -374,7 +372,7 @@ type Msg
     | IsUserConnected Bool
     | SwapHistory (List HistoricalSwap)
     | UserBalances UserBalancesResponse
-    | MarketsInfo GetMarketsResponse
+    | MarketsInfo MarketData
     | UnlockedLiquidity String
     | SetRepayingMax
     | AboveLimit Bool
@@ -499,7 +497,7 @@ update msg model =
             ( { model | supplyUnderlying = resp.supplyBalanceUnderlying, supplyBalanceCToken = resp.supplyBalanceCTokens, cTokenBalance = resp.userCTokenBalance }, Cmd.none )
 
         MarketsInfo resp ->
-            ( { model | lockedCollateral = resp.lockedCollateral, notionalReceivingFixed = resp.notionalReceivingFixed, notionalPayingFixed = resp.notionalPayingFixed, avgFixedRatePaying = resp.avgFixedRatePaying, avgFixedRateReceiving = resp.avgFixedRateReceiving, supplierLiquidity = resp.supplierLiquidity }, Cmd.none )
+            ( { model | marketData = resp }, Cmd.none )
 
         UnlockedLiquidity unlocked ->
             ( { model | unlockedLiquidity = unlocked }, Cmd.none )
@@ -609,15 +607,26 @@ landing =
     div [ id "modal" ]
         [ div
             [ class "landing-title" ]
-            [ h3 [] [ text "Rho is a protocol for interest rate swaps" ] ]
+            [ h3 [] [ text "Rho" ] ]
         , ul [ class "landing-list" ]
-            [ li []
-                [ text "You can use it for things" ]
-            , li [ class "underlineLink" ]
-                [ a
-                    [ href "https://app.compound.finance/" ]
-                    [ text "get cDAI" ]
+            [ li [ class "warning" ]
+                [ text "Experimental software in beta, use with caution" ]
+            , li []
+                [ text "Rho allows users to open interest rate swaps against a liquidity pool." ]
+            , li []
+                [ text "The floating leg is benchmarked against cDAI borrow rates." ]
+            , li []
+                [ text "Rho uses cDAI as collateral. "
+                , a
+                    [ class "underlineLink", href "https://app.compound.finance/" ]
+                    [ text "Get cDAI here." ]
                 ]
+            , li []
+                [ text "Swaps can be closed after 7 days." ]
+            , li []
+                [ text "After 7.5 days, keepers receive a fee for closing swaps." ]
+            , li []
+                [ a [ class "underlineLink", href "https://github.com/Rho-protocol/rho-docs" ] [ text "Learn more" ] ]
             ]
         , button [ class "ctaButton", id "connectButton" ] [ a [ href "/app" ] [ text "App" ] ]
         ]
@@ -625,13 +634,16 @@ landing =
 
 marketsPage : Model -> Html Msg
 marketsPage model =
+    let
+        marketData =
+            model.marketData
+    in
     div [ id "modal" ]
         [ h3 [ id "title" ] [ text "Market Overview" ]
-        , div [ class "modal-field" ] [ text ("Swaps Receiving Fixed: " ++ model.notionalReceivingFixed) ]
-        , div [ class "modal-field" ] [ text ("Fixed Rate Receiving: " ++ model.avgFixedRateReceiving) ]
-        , div [ class "modal-field" ] [ text ("Swaps Paying Fixed: " ++ model.notionalPayingFixed) ]
-        , div [ class "modal-field" ] [ text ("Fixed Rate Paying: " ++ model.avgFixedRatePaying) ]
-        , div [ class "modal-field" ] [ text ("Total Liquidity: " ++ model.supplierLiquidity) ]
+        , div [ class "modal-field" ] [ text ("Protocol receiving fixed rate of " ++ marketData.avgFixedRateReceiving ++ "% on " ++ marketData.notionalReceivingFixed ++ " DAI") ]
+        , div [ class "modal-field" ] [ text ("Protocol paying fixed rate of " ++ marketData.avgFixedRatePaying ++ "% on " ++ marketData.notionalPayingFixed ++ " DAI") ]
+        , div [ class "modal-field" ] [ text ("Protocol has " ++ marketData.supplierLiquidity ++ " DAI of liquidity, " ++ marketData.lockedCollateral ++ " is locked in pending swaps") ]
+        , div [ class "modal-field" ] [ text ("The liquidity limit is " ++ marketData.liquidityLimit ++ " DAI") ]
         ]
 
 
@@ -766,7 +778,7 @@ closeModal : Model -> Html Msg
 closeModal model =
     let
         closeable =
-            List.filter (\swap -> swap.userPayout == Nothing) model.historicalSwaps
+            List.filter (\swap -> swap.closeable == True) model.historicalSwaps
 
         elems =
             case closeable of
@@ -884,6 +896,8 @@ footerDiv =
     ul [ id "footer" ]
         [ li [ class "footer-elem" ] [ a [ href "https://twitter.com/rho_finance" ] [ text "Twitter " ] ]
         , li [ class "footer-elem" ] [ a [ href "https://github.com/Rho-protocol" ] [ text "Github " ] ]
+        , li [ class "footer-elem" ] [ a [ href "https://discord.gg/Pvhn5fTVsm" ] [ text "Discord " ] ]
+        , li [ class "footer-elem" ] [ a [ href "https://github.com/Rho-protocol/rho-docs" ] [ text "Docs " ] ]
         ]
 
 
