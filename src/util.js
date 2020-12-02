@@ -14,6 +14,7 @@ export const i = new ethers.utils.Interface([
 
 
 	// rho
+	"function SWAP_MIN_DURATION() returns (uint)",
 	"function liquidityLimit() returns (uint)",
 	"function supply(uint cTokenSupplyAmount)",
 	"function remove(uint removeCTokenAmount)",

@@ -3,14 +3,14 @@ import "../build-css/main.css";
 import { Elm } from "./Main.elm";
 import { makeWeb3Ports, makeStaticPorts } from "./web3Ports.js";
 
-const defaultChainId = process.env.ELM_APP_DEFAULT_CHAIN_ID || "0x2a";
-const defaultNetwork = process.env.ELM_APP_DEFAULT_NETWORK || "kovan";
+const defaultChainId = process.env.ELM_APP_DEFAULT_CHAIN_ID || "0x1";
+const defaultNetwork = process.env.ELM_APP_DEFAULT_NETWORK || "mainnet";
 
 const app = Elm.Main.init({
 	node: document.getElementById("root"),
 	flags: {
 		defaultNetwork: defaultNetwork,
-		duration: process.env.ELM_APP_DURATION_DAYS || "0.0017",
+		duration: process.env.ELM_APP_DURATION_DAYS || "7",
 		underlying: process.env.ELM_APP_UNDERLYING || "DAI",
 		collateral: process.env.ELM_APP_COLLATERAL || "cDAI",
 	},
@@ -31,7 +31,7 @@ if (window.ethereum) {
 
 const netMap = {
 	"0xNaN": { name: "development", host: "http://localhost:8545" },
-	// "0x1": {"name": "mainnet", "host": "https://mainnet-eth.compound.finance"},
+	"0x1": {"name": "mainnet", "host": "https://mainnet-eth.compound.finance"},
 	"0x2a": { name: "kovan", host: "https://kovan-eth.compound.finance" },
 };
 
